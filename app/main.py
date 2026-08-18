@@ -23,6 +23,9 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
+    # Web serverga bot va dispatcher ulash
+    configure_telegram(bot, dp)
+
     # Telegram webhook manzili
     webhook_url = f"{PUBLIC_BASE_URL}/telegram/webhook"
 
@@ -30,9 +33,6 @@ async def main():
         webhook_url,
         drop_pending_updates=False,
     )
-
-    # Web serverga bot va dispatcher ulash
-    configure_telegram(bot, dp)
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -45,8 +45,8 @@ async def main():
 
     try:
         await server.serve()
-
     finally:
+        await bot.delete_webhook()
         await bot.session.close()
 
 
