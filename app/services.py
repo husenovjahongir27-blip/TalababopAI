@@ -1,45 +1,71 @@
 from pathlib import Path
+
 from openai import AsyncOpenAI
+
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.section import WD_SECTION
-from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+
 from pptx import Presentation
 from pptx.util import Inches, Pt as PPTPt
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE
 
 from .config import OPENAI_API_KEY, OPENAI_MODEL
 
+
 Path("output").mkdir(exist_ok=True)
 
-client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+client = (
+    AsyncOpenAI(api_key=OPENAI_API_KEY)
+    if OPENAI_API_KEY
+    else None
+)
 
 
 # =========================================================
-# OPENAI
+# AI
 # =========================================================
 
-async def generate(kind, topic, pages=None, template=None, design=None):
+async def generate(
+    kind,
+    topic,
+    pages=None,
+    template=None,
+    design=None,
+):
     if not client:
         return "OPENAI_API_KEY sozlanmagan."
 
     extra = ""
 
     if pages:
-        extra += f"\nHajmi: taxminan {pages} bet."
+        extra += f"""
+Hujjat hajmi: {pages} bet.
+Hajmni mazmunni takrorlash yoki keraksiz cho'zish orqali emas,
+mazmunli va to'liq ilmiy material orqali ta'minla.
+"""
 
     if template:
-        extra += f"\nTanlangan shablon: {template}."
+        extra += f"""
+Tanlangan shablon: {template}.
+"""
 
     if design:
-        extra += f"\nTanlangan dizayn: {design}."
+        extra += f"""
+Tanlangan slayd dizayni: {design}.
+"""
 
-    if kind.lower() == "kurs ishi":
+    kind_lower = kind.lower()
+
+    if kind_lower == "kurs ishi":
         instruction = """
-Kurs ishini ilmiy va akademik uslubda tayyorla.
+KURS ISHI TAYYORLA.
 
 Tuzilishi:
-1. TITUL VARAQ uchun ma'lumotlar
+
+1. TITUL VARAQ
 2. MUNDARIJA
 3. KIRISH
 4. I BOB
@@ -53,16 +79,26 @@ Tuzilishi:
 6. XULOSA
 7. FOYDALANILGAN ADABIYOTLAR
 
-Kirishda mavzuning dolzarbligi, maqsadi, vazifalari,
-obyekti va predmeti yoritilsin.
+Kirishda:
+- mavzuning dolzarbligi;
+- tadqiqot maqsadi;
+- tadqiqot vazifalari;
+- tadqiqot obyekti;
+- tadqiqot predmeti
+yoritilsin.
 
-Har bir bob mazmunan to'liq va ilmiy bo'lsin.
-Matnni sun'iy ravishda takrorlamasdan, mazmunli va
-talaba topshirishi mumkin bo'lgan shaklda yoz.
+Har bir bobda 3 ta mazmunli bo'lim bo'lsin.
+
+Ilmiy uslubdan foydalan.
+Mavzuni to'liq ochib ber.
+Bir xil gaplarni takrorlama.
 """
-    elif kind.lower() == "mustaqil ish":
+
+    elif kind_lower == "mustaqil ish":
         instruction = """
-Mustaqil ishni quyidagi tartibda tayyorla:
+MUSTAQIL ISH TAYYORLA.
+
+Tuzilishi:
 
 1. TITUL VARAQ
 2. REJA
@@ -71,11 +107,14 @@ Mustaqil ishni quyidagi tartibda tayyorla:
 5. XULOSA
 6. FOYDALANILGAN ADABIYOTLAR
 
-Mavzu to'liq ochib berilsin.
+Mavzu to'liq va izchil yoritilsin.
 """
-    elif kind.lower() == "referat":
+
+    elif kind_lower == "referat":
         instruction = """
-Referatni quyidagi ilmiy tartibda tayyorla:
+REFERAT TAYYORLA.
+
+Tuzilishi:
 
 1. TITUL VARAQ
 2. REJA
@@ -84,104 +123,122 @@ Referatni quyidagi ilmiy tartibda tayyorla:
 5. XULOSA
 6. FOYDALANILGAN ADABIYOTLAR
 
-Matn izchil, ilmiy va tushunarli bo'lsin.
+Ilmiy va tushunarli uslubdan foydalan.
 """
-    elif kind.lower() == "maqola":
+
+    elif kind_lower == "maqola":
         instruction = """
-Ilmiy maqola tayyorla.
+ILMIY MAQOLA TAYYORLA.
 
 Tuzilishi:
-- Sarlavha
-- Muallif
-- Annotatsiya
-- Kalit so'zlar
-- Kirish
-- Adabiyotlar tahlili
-- Tadqiqot metodologiyasi
-- Natijalar va muhokama
-- Xulosa
-- Foydalanilgan adabiyotlar
 
-Maqola ilmiy uslubda, mantiqiy va tabiiy yozilsin.
+Sarlavha
+Muallif
+Annotatsiya
+Kalit so'zlar
+Kirish
+Adabiyotlar tahlili
+Tadqiqot metodologiyasi
+Natijalar va muhokama
+Xulosa
+Foydalanilgan adabiyotlar
+
+Maqola ilmiy maqola talablariga mos,
+mantiqiy va tabiiy yozilsin.
 """
-    elif kind.lower() == "tezis":
+
+    elif kind_lower == "tezis":
         instruction = """
-Ilmiy tezis tayyorla.
+ILMIY TEZIS TAYYORLA.
 
 Tuzilishi:
-- Sarlavha
-- Muallif
-- Asosiy mazmun
-- Ilmiy natija
-- Xulosa
-- Kalit so'zlar
-- Foydalanilgan manbalar
+
+Sarlavha
+Muallif
+Asosiy mazmun
+Ilmiy natijalar
+Xulosa
+Kalit so'zlar
+Foydalanilgan manbalar
 """
-    elif kind.lower() == "konspekt":
+
+    elif kind_lower == "konspekt":
         instruction = """
-Mavzu bo'yicha tartibli va mazmunli konspekt tayyorla.
-Asosiy tushunchalar, muhim ma'lumotlar va xulosalar
-aniq ajratilsin.
+MAVZU BO'YICHA KONSPEKT TAYYORLA.
+
+Muhim tushunchalar,
+asosiy fikrlar,
+faktlar,
+ta'riflar
+va xulosalarni tartibli joylashtir.
 """
-    elif kind.lower() == "glossariy":
+
+    elif kind_lower == "glossariy":
         instruction = """
-Mavzu bo'yicha glossariy tayyorla.
-Muhim atamalarni tanla va har biriga qisqa,
-aniq va ilmiy ta'rif ber.
+MAVZU BO'YICHA GLOSSARIY TAYYORLA.
+
+Muhim ilmiy atamalarni tanla.
+Har bir atamaga aniq, qisqa va ilmiy ta'rif ber.
 """
+
     else:
         instruction = """
-Vazifani o'zbek tilida professional, tabiiy,
-ravon va tayyor foydalanish mumkin bo'lgan
-shaklda bajar.
+Vazifani professional, tabiiy va ravon
+o'zbek tilida bajar.
 """
 
     prompt = f"""
-Vazifa turi: {kind}
-Mavzu: {topic}
+Sen professional o'zbek tilidagi
+ta'lim va ilmiy ishlar AI yordamchisisan.
+
+Vazifa turi:
+{kind}
+
+Mavzu:
+{topic}
+
 {extra}
 
 {instruction}
 
 Umumiy talablar:
+
 - O'zbek tilida yoz.
-- Grammatik xatolarga yo'l qo'yma.
-- Mazmunni takrorlama.
-- Sarlavha va bo'limlarni aniq ajrat.
-- Keraksiz izoh va AI haqida gap yozma.
-- Matnni imkon qadar batafsil tayyorla.
+- Grammatik jihatdan to'g'ri yoz.
+- Tabiiy inson yozganidek bo'lsin.
+- Bir xil fikrlarni takrorlama.
+- Keraksiz AI izohlarini yozma.
+- Sarlavhalarni aniq ajrat.
+- Mavzudan chetga chiqma.
+- Imkon qadar mazmunli va batafsil yoz.
 """
 
-    try:
-        r = await client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Sen professional o'zbek tilidagi "
-                        "ta'lim va ilmiy ishlar AI yordamchisisan."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0.6,
-        )
+    response = await client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Sen professional o'zbek tilidagi "
+                    "ta'lim va ilmiy ishlar AI yordamchisisan."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        temperature=0.6,
+    )
 
-        return r.choices[0].message.content or ""
-
-    except Exception as e:
-        raise e
+    return response.choices[0].message.content or ""
 
 
 async def answer(q):
     if not client:
         return "OPENAI_API_KEY sozlanmagan."
 
-    r = await client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=[
             {
@@ -192,17 +249,18 @@ async def answer(q):
         temperature=0.5,
     )
 
-    return r.choices[0].message.content or ""
+    return response.choices[0].message.content or ""
 
 
 # =========================================================
-# WORD FORMAT
+# WORD
 # =========================================================
 
 def setup_document(doc):
+
     section = doc.sections[0]
 
-    # Akademik hoshiyalar
+    # Hoshiyalar
     section.top_margin = Cm(2)
     section.bottom_margin = Cm(2)
     section.left_margin = Cm(3)
@@ -213,38 +271,67 @@ def setup_document(doc):
     style.font.name = "Times New Roman"
     style.font.size = Pt(14)
 
-    # Word uchun shriftning barcha belgilarida
-    # Times New Roman ishlatilishini ta'minlash
-    style._element.rPr.rFonts.set(
-        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii",
-        "Times New Roman",
-    )
-    style._element.rPr.rFonts.set(
-        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi",
-        "Times New Roman",
-    )
+    # Times New Roman
+    rpr = style._element.get_or_add_rPr()
+    rfonts = rpr.rFonts
 
-    pf = style.paragraph_format
-    pf.line_spacing = 1.5
-    pf.first_line_indent = Cm(1.25)
-    pf.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    pf.space_after = Pt(0)
-    pf.space_before = Pt(0)
+    if rfonts is not None:
+        rfonts.set(
+            "{http://schemas.openxmlformats.org/"
+            "wordprocessingml/2006/main}ascii",
+            "Times New Roman",
+        )
+        rfonts.set(
+            "{http://schemas.openxmlformats.org/"
+            "wordprocessingml/2006/main}hAnsi",
+            "Times New Roman",
+        )
+
+    paragraph = style.paragraph_format
+
+    paragraph.line_spacing = 1.5
+    paragraph.first_line_indent = Cm(1.25)
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    paragraph.space_before = Pt(0)
+    paragraph.space_after = Pt(0)
 
 
 def add_text_paragraph(doc, text):
+
     if not text.strip():
         return
 
     p = doc.add_paragraph()
 
     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
     p.paragraph_format.line_spacing = 1.5
     p.paragraph_format.first_line_indent = Cm(1.25)
-    p.paragraph_format.space_after = Pt(0)
     p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_after = Pt(0)
 
     run = p.add_run(text.strip())
+
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(14)
+
+    return p
+
+
+def add_heading(doc, text):
+
+    p = doc.add_paragraph()
+
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    p.paragraph_format.line_spacing = 1.5
+    p.paragraph_format.first_line_indent = Cm(0)
+    p.paragraph_format.space_before = Pt(8)
+    p.paragraph_format.space_after = Pt(8)
+
+    run = p.add_run(text.strip())
+
+    run.bold = True
     run.font.name = "Times New Roman"
     run.font.size = Pt(14)
 
@@ -252,67 +339,73 @@ def add_text_paragraph(doc, text):
 
 
 # =========================================================
-# TITUL VARAQ
+# TITUL
 # =========================================================
 
-def add_title_page(doc, title, kind="KURS ISHI"):
-    section = doc.sections[0]
+def add_title_page(doc, title, kind):
 
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_after = Pt(12)
 
-    r = p.add_run("GULISTON DAVLAT UNIVERSITETI")
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    r = p.add_run(
+        "GULISTON DAVLAT UNIVERSITETI"
+    )
+
     r.bold = True
     r.font.name = "Times New Roman"
     r.font.size = Pt(14)
 
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_after = Pt(40)
-
-    r = p.add_run("________________________________")
-    r.font.name = "Times New Roman"
-    r.font.size = Pt(14)
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_after = Pt(30)
-
-    r = p.add_run(kind.upper())
-    r.bold = True
-    r.font.name = "Times New Roman"
-    r.font.size = Pt(16)
-
-    p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.paragraph_format.space_after = Pt(40)
-
-    r = p.add_run(title)
-    r.bold = True
-    r.font.name = "Times New Roman"
-    r.font.size = Pt(16)
-
-    for _ in range(4):
+    for _ in range(2):
         doc.add_paragraph()
 
     p = doc.add_paragraph()
+
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    r = p.add_run(kind.upper())
+
+    r.bold = True
+    r.font.name = "Times New Roman"
+    r.font.size = Pt(16)
+
+    for _ in range(2):
+        doc.add_paragraph()
+
+    p = doc.add_paragraph()
+
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    r = p.add_run(title)
+
+    r.bold = True
+    r.font.name = "Times New Roman"
+    r.font.size = Pt(16)
+
+    for _ in range(5):
+        doc.add_paragraph()
+
+    p = doc.add_paragraph()
+
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     r = p.add_run(
         "Bajardi: ______________________________\n"
         "Tekshirdi: _____________________________"
     )
+
     r.font.name = "Times New Roman"
     r.font.size = Pt(14)
 
-    for _ in range(3):
+    for _ in range(4):
         doc.add_paragraph()
 
     p = doc.add_paragraph()
+
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     r = p.add_run("Guliston — 2026")
+
     r.font.name = "Times New Roman"
     r.font.size = Pt(14)
 
@@ -320,10 +413,16 @@ def add_title_page(doc, title, kind="KURS ISHI"):
 
 
 # =========================================================
-# DOCX YARATISH
+# DOCX
 # =========================================================
 
-def make_docx(title, body, kind="hujjat", pages=None):
+def make_docx(
+    title,
+    body,
+    kind="hujjat",
+    pages=None,
+):
+
     safe_title = (
         title[:60]
         .replace("/", "_")
@@ -340,50 +439,56 @@ def make_docx(title, body, kind="hujjat", pages=None):
     path = Path("output") / f"{safe_title}.docx"
 
     doc = Document()
+
     setup_document(doc)
 
-    # Titul faqat kerakli hujjatlarda
-    if kind.lower() in ["kurs ishi", "mustaqil ish", "referat"]:
+    # Titul
+    if kind.lower() in [
+        "kurs ishi",
+        "mustaqil ish",
+        "referat",
+    ]:
         add_title_page(
             doc,
             title,
-            kind.upper()
+            kind,
         )
 
-    # Asosiy matn
     lines = body.splitlines()
 
     for line in lines:
+
         text = line.strip()
 
         if not text:
             continue
 
-        # Katta sarlavhalarni markazga chiqarish
         upper = text.upper()
 
-        if (
+        is_heading = (
             upper in [
                 "KIRISH",
                 "XULOSA",
                 "MUNDARIJA",
-                "FOYDALANILGAN ADABIYOTLAR",
                 "ASOSIY QISM",
+                "FOYDALANILGAN ADABIYOTLAR",
             ]
             or upper.startswith("I BOB")
             or upper.startswith("II BOB")
-        ):
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before = Pt(6)
-            p.paragraph_format.space_after = Pt(6)
+            or upper.startswith("1.")
+            or upper.startswith("2.")
+        )
 
-            r = p.add_run(text)
-            r.bold = True
-            r.font.name = "Times New Roman"
-            r.font.size = Pt(14)
+        if is_heading:
+            add_heading(
+                doc,
+                text,
+            )
         else:
-            add_text_paragraph(doc, text)
+            add_text_paragraph(
+                doc,
+                text,
+            )
 
     doc.save(path)
 
@@ -391,34 +496,53 @@ def make_docx(title, body, kind="hujjat", pages=None):
 
 
 # =========================================================
-# PPTX
+# SLAYD DIZAYNLARI
 # =========================================================
 
 DESIGNS = {
     "🎓 Akademik": {
-        "bg": "academic",
         "font": "Times New Roman",
+        "title_size": 30,
+        "body_size": 21,
     },
+
     "💼 Professional": {
-        "bg": "professional",
         "font": "Arial",
+        "title_size": 30,
+        "body_size": 21,
     },
+
     "✨ Zamonaviy": {
-        "bg": "modern",
         "font": "Aptos",
+        "title_size": 32,
+        "body_size": 22,
     },
+
     "🧊 Minimal": {
-        "bg": "minimal",
         "font": "Arial",
+        "title_size": 28,
+        "body_size": 20,
     },
+
     "🌈 Kreativ": {
-        "bg": "creative",
         "font": "Aptos",
+        "title_size": 32,
+        "body_size": 22,
     },
 }
 
 
-def make_pptx(title, body, n=10, design="🎓 Akademik"):
+# =========================================================
+# SLAYD
+# =========================================================
+
+def make_pptx(
+    title,
+    body,
+    n=10,
+    design="🎓 Akademik",
+):
+
     safe_title = (
         title[:60]
         .replace("/", "_")
@@ -445,20 +569,25 @@ def make_pptx(title, body, n=10, design="🎓 Akademik"):
         if x.strip()
     ]
 
-    n = max(1, min(int(n), 30))
-
-    # Matnni tanlangan slayd soniga bo'lish
-    per_slide = max(
+    n = max(
         1,
-        (len(lines) + n - 1) // n
+        min(int(n), 30),
     )
 
-    selected_design = DESIGNS.get(
+    # Agar AI kam matn qaytarsa,
+    # mavjud matnni keraksiz takrorlamaymiz.
+    per_slide = max(
+        1,
+        (len(lines) + n - 1) // n,
+    )
+
+    selected = DESIGNS.get(
         design,
-        DESIGNS["🎓 Akademik"]
+        DESIGNS["🎓 Akademik"],
     )
 
     for i in range(n):
+
         chunk = lines[
             i * per_slide:
             (i + 1) * per_slide
@@ -468,57 +597,110 @@ def make_pptx(title, body, n=10, design="🎓 Akademik"):
             break
 
         slide = presentation.slides.add_slide(
-            presentation.slide_layouts[1]
+            presentation.slide_layouts[6]
         )
 
-        # Sarlavha
-        slide.shapes.title.text = (
+        # -------------------------
+        # TITLE
+        # -------------------------
+
+        title_box = slide.shapes.add_textbox(
+            Inches(0.7),
+            Inches(0.4),
+            Inches(11.9),
+            Inches(1.0),
+        )
+
+        title_frame = title_box.text_frame
+
+        title_frame.clear()
+
+        paragraph = title_frame.paragraphs[0]
+
+        paragraph.alignment = PP_ALIGN.CENTER
+
+        run = paragraph.add_run()
+
+        run.text = (
             title
             if i == 0
             else f"{title} — {i + 1}"
         )
 
-        title_shape = slide.shapes.title
+        run.font.name = selected["font"]
+        run.font.size = PPTPt(
+            selected["title_size"]
+        )
+        run.font.bold = True
 
-        for paragraph in title_shape.text_frame.paragraphs:
-            for run in paragraph.runs:
-                run.font.name = selected_design["font"]
-                run.font.size = PPTPt(28)
-                run.font.bold = True
+        # -------------------------
+        # BODY
+        # -------------------------
 
-        # Asosiy matn
-        text_frame = slide.placeholders[1].text_frame
-        text_frame.clear()
+        body_box = slide.shapes.add_textbox(
+            Inches(1.0),
+            Inches(1.7),
+            Inches(11.3),
+            Inches(5.0),
+        )
+
+        frame = body_box.text_frame
+
+        frame.clear()
+
+        frame.word_wrap = True
 
         for j, text in enumerate(chunk):
+
             paragraph = (
-                text_frame.paragraphs[0]
+                frame.paragraphs[0]
                 if j == 0
-                else text_frame.add_paragraph()
+                else frame.add_paragraph()
             )
 
             paragraph.text = text
+
             paragraph.level = 0
 
+            paragraph.space_after = PPTPt(10)
+
             for run in paragraph.runs:
-                run.font.name = selected_design["font"]
-                run.font.size = PPTPt(22)
 
-        # Dizayn turi bo'yicha oddiy farqlash
-        if selected_design["bg"] == "minimal":
-            slide.background.fill.solid()
+                run.font.name = selected["font"]
 
-        elif selected_design["bg"] == "academic":
-            slide.background.fill.solid()
+                run.font.size = PPTPt(
+                    selected["body_size"]
+                )
 
-        elif selected_design["bg"] == "professional":
-            slide.background.fill.solid()
+        # -------------------------
+        # SLIDE NUMBER
+        # -------------------------
 
-        elif selected_design["bg"] == "modern":
-            slide.background.fill.solid()
+        number_box = slide.shapes.add_textbox(
+            Inches(12.0),
+            Inches(6.8),
+            Inches(0.7),
+            Inches(0.4),
+        )
 
-        elif selected_design["bg"] == "creative":
-            slide.background.fill.solid()
+        number_frame = number_box.text_frame
+
+        number_frame.clear()
+
+        number_paragraph = (
+            number_frame.paragraphs[0]
+        )
+
+        number_paragraph.alignment = PP_ALIGN.RIGHT
+
+        number_run = (
+            number_paragraph.add_run()
+        )
+
+        number_run.text = str(i + 1)
+
+        number_run.font.name = selected["font"]
+        number_run.font.size = PPTPt(12)
 
     presentation.save(path)
 
