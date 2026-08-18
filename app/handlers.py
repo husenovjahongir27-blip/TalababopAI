@@ -12,10 +12,10 @@ from aiogram.types import (
 
 from .config import (
     BOT_NAME,
-    GENERATION_PRICE_UZS,
     REFERRAL_BONUS_UZS,
     ADMIN_IDS,
 )
+
 from .db import (
     ensure_user,
     get_user,
@@ -25,20 +25,68 @@ from .db import (
     stats,
     add_balance,
 )
+
 from .payments import create_payment
 from .services import generate, answer, make_docx, make_pptx
-
 
 router = Router()
 
 waiting = {}
 
 
-# =========================
+# =========================================================
+# NARXLAR
+# =========================================================
+
+SLIDE_PRICES = {
+    12: 3000,
+    30: 5000,
+}
+
+COURSE_PRICES = {
+    25: 12000,
+    30: 15000,
+    40: 25000,
+    50: 30000,
+    60: 40000,
+}
+
+INDEPENDENT_PRICES = {
+    15: 5000,
+    20: 7000,
+    25: 9000,
+    30: 11000,
+    35: 13000,
+    40: 15000,
+}
+
+ARTICLE_PRICE = 7000
+THESIS_PRICE = 5000
+GLOSSARY_PRICE = 4000
+
+# Konspekt: 1 bet = 500 so'm
+KONSPEKT_PER_PAGE = 500
+
+
+# =========================================================
+# SLAYD DIZAYNLARI
+# =========================================================
+
+SLIDE_DESIGNS = [
+    "🎓 Akademik",
+    "💼 Professional",
+    "✨ Zamonaviy",
+    "🧊 Minimal",
+    "🌈 Kreativ",
+]
+
+
+# =========================================================
 # ASOSIY MENYU
-# =========================
+# =========================================================
 
 def main_menu():
+
     return ReplyKeyboardMarkup(
         keyboard=[
             [
@@ -88,9 +136,28 @@ def main_menu():
     )
 
 
-# =========================
+# =========================================================
+# INLINE YORDAMCHI
+# =========================================================
+
+def inline_buttons(items, prefix):
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=str(text),
+                    callback_data=f"{prefix}:{value}",
+                )
+            ]
+            for text, value in items
+        ]
+    )
+
+
+# =========================================================
 # XIZMATLAR
-# =========================
+# =========================================================
 
 KINDS = {
     "🪄 Slayd yaratish ✨": ("Slayd yaratish", "pptx"),
@@ -113,9 +180,9 @@ TOOLS = {
 }
 
 
-# =========================
+# =========================================================
 # START
-# =========================
+# =========================================================
 
 @router.message(CommandStart())
 async def start(message: Message):
@@ -137,17 +204,17 @@ async def start(message: Message):
 
     await message.answer(
         f"👋 Assalomu alaykum!\n\n"
-        f"🤖 {BOT_NAME}\n"
-        f"🎁 Bepul: {user[4]}\n"
+        f"🤖 {BOT_NAME}\n\n"
+        f"🎁 Bepul urinishlar: {user[4]} ta\n"
         f"💰 Balans: {user[3]:,} so'm\n\n"
-        f"👇 Menyudan xizmatni tanlang:",
+        f"👇 Kerakli xizmatni tanlang:",
         reply_markup=main_menu(),
     )
 
 
-# =========================
+# =========================================================
 # MENU
-# =========================
+# =========================================================
 
 @router.message(Command("menu"))
 async def menu(message: Message):
@@ -160,33 +227,361 @@ async def menu(message: Message):
     )
 
 
-# =========================
-# AI XIZMATLARI
-# =========================
+# =========================================================
+# SLAYD
+# =========================================================
 
-@router.message(F.text.in_(KINDS.keys()))
-async def choose_service(message: Message):
+@router.message(F.text == "🪄 Slayd yaratish ✨")
+async def slide_start(message: Message):
 
     await ensure_user(message.from_user)
 
-    waiting[message.from_user.id] = KINDS[message.text]
+    buttons = [
+        ("📓 12 betgacha — 3 000 so'm", "12"),
+        ("📓 13–30 bet — 5 000 so'm", "30"),
+    ]
 
     await message.answer(
-        f"📝 {KINDS[message.text][0]}\n\n"
-        f"Mavzuni yuboring:",
-        reply_markup=main_menu(),
+        "🪄 SLAYD YARATISH\n\n"
+        "Avval slayd sonini tanlang:",
+        reply_markup=inline_buttons(buttons, "slidepage"),
     )
 
+
+@router.callback_query(F.data.startswith("slidepage:"))
+async def slide_page(callback: CallbackQuery):
+
+    pages = int(callback.data.split(":")[1])
+
+    price = SLIDE_PRICES[pages]
+
+    waiting[callback.from_user.id] = {
+        "kind": "Slayd yaratish",
+        "file_type": "pptx",
+        "pages": pages,
+        "price": price,
+        "step": "design",
+    }
+
+    await callback.answer()
+
+    await callback.message.edit_text(
+        f"🪄 Slayd: {pages} betgacha\n"
+        f"💰 Narxi: {price:,} so'm\n\n"
+        f"🎨 Endi dizaynni tanlang:",
+        reply_markup=inline_buttons(
+            [(x, x) for x in SLIDE_DESIGNS],
+            "slidedesign",
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("slidedesign:"))
+async def slide_design(callback: CallbackQuery):
+
+    design = callback.data.split(":", 1)[1]
+
+    data = waiting.get(callback.from_user.id)
+
+    if not data:
+        await callback.answer(
+            "❌ Buyurtma topilmadi.",
+            show_alert=True,
+        )
+        return
+
+    data["design"] = design
+    data["step"] = "topic"
+
+    waiting[callback.from_user.id] = data
+
+    await callback.answer()
+
+    await callback.message.edit_text(
+        f"🎨 Tanlangan dizayn: {design}\n\n"
+        f"📝 Slayd mavzusini yuboring:",
+    )
+
+
+# =========================================================
+# KURS ISHI
+# =========================================================
+
+@router.message(F.text == "🎓 Kurs ishi 📑")
+async def course_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    buttons = [
+        ("📘 25 bet — 12 000 so'm", "25"),
+        ("📘 30 bet — 15 000 so'm", "30"),
+        ("📘 40 bet — 25 000 so'm", "40"),
+        ("📘 50 bet — 30 000 so'm", "50"),
+        ("📘 60 bet — 40 000 so'm", "60"),
+    ]
+
+    await message.answer(
+        "🎓 KURS ISHI\n\n"
+        "Kurs ishi hajmini tanlang:",
+        reply_markup=inline_buttons(buttons, "coursepage"),
+    )
+
+
+@router.callback_query(F.data.startswith("coursepage:"))
+async def course_page(callback: CallbackQuery):
+
+    pages = int(callback.data.split(":")[1])
+    price = COURSE_PRICES[pages]
+
+    waiting[callback.from_user.id] = {
+        "kind": "Kurs ishi",
+        "file_type": "docx",
+        "pages": pages,
+        "price": price,
+        "step": "topic",
+    }
+
+    await callback.answer()
+
+    await callback.message.edit_text(
+        f"🎓 Kurs ishi: {pages} bet\n"
+        f"💰 Narxi: {price:,} so'm\n\n"
+        f"📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# MUSTAQIL ISH
+# =========================================================
+
+@router.message(F.text == "📄 Mustaqil ish ✨")
+async def independent_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    buttons = [
+        ("📘 15 bet — 5 000 so'm", "15"),
+        ("📘 20 bet — 7 000 so'm", "20"),
+        ("📘 25 bet — 9 000 so'm", "25"),
+        ("📘 30 bet — 11 000 so'm", "30"),
+        ("📘 35 bet — 13 000 so'm", "35"),
+        ("📘 40 bet — 15 000 so'm", "40"),
+    ]
+
+    await message.answer(
+        "📄 MUSTAQIL ISH\n\n"
+        "Hajmini tanlang:",
+        reply_markup=inline_buttons(buttons, "indpage"),
+    )
+
+
+@router.callback_query(F.data.startswith("indpage:"))
+async def independent_page(callback: CallbackQuery):
+
+    pages = int(callback.data.split(":")[1])
+    price = INDEPENDENT_PRICES[pages]
+
+    waiting[callback.from_user.id] = {
+        "kind": "Mustaqil ish",
+        "file_type": "docx",
+        "pages": pages,
+        "price": price,
+        "step": "topic",
+    }
+
+    await callback.answer()
+
+    await callback.message.edit_text(
+        f"📄 Mustaqil ish: {pages} bet\n"
+        f"💰 Narxi: {price:,} so'm\n\n"
+        f"📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# REFERAT
+# =========================================================
+
+@router.message(F.text == "📑 Referat ✨")
+async def referat_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    buttons = [
+        ("📘 15 bet — 5 000 so'm", "15"),
+        ("📘 20 bet — 7 000 so'm", "20"),
+        ("📘 25 bet — 9 000 so'm", "25"),
+        ("📘 30 bet — 11 000 so'm", "30"),
+        ("📘 35 bet — 13 000 so'm", "35"),
+        ("📘 40 bet — 15 000 so'm", "40"),
+    ]
+
+    await message.answer(
+        "📑 REFERAT\n\n"
+        "Hajmini tanlang:",
+        reply_markup=inline_buttons(buttons, "refpage"),
+    )
+
+
+@router.callback_query(F.data.startswith("refpage:"))
+async def referat_page(callback: CallbackQuery):
+
+    pages = int(callback.data.split(":")[1])
+    price = INDEPENDENT_PRICES[pages]
+
+    waiting[callback.from_user.id] = {
+        "kind": "Referat",
+        "file_type": "docx",
+        "pages": pages,
+        "price": price,
+        "step": "topic",
+    }
+
+    await callback.answer()
+
+    await callback.message.edit_text(
+        f"📑 Referat: {pages} bet\n"
+        f"💰 Narxi: {price:,} so'm\n\n"
+        f"📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# KONSPEKT
+# =========================================================
+
+@router.message(F.text == "✍️ Konspekt")
+async def konspekt_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    await message.answer(
+        "✍️ KONSPEKT\n\n"
+        "Necha betlik konspekt kerak?\n\n"
+        "💰 Narxi: 500 so'm / bet\n\n"
+        "Masalan: 10",
+    )
+
+    waiting[message.from_user.id] = {
+        "kind": "Konspekt",
+        "file_type": "docx",
+        "step": "pages",
+    }
+
+
+# =========================================================
+# MAQOLA
+# =========================================================
+
+@router.message(F.text == "📰 Maqola ✨")
+async def article_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    waiting[message.from_user.id] = {
+        "kind": "Maqola",
+        "file_type": "docx",
+        "pages": None,
+        "price": ARTICLE_PRICE,
+        "step": "topic",
+    }
+
+    await message.answer(
+        "📰 MAQOLA\n\n"
+        "💰 Narxi: 7 000 so'm\n\n"
+        "📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# TEZIS
+# =========================================================
+
+@router.message(F.text == "📝 Tezis ✨")
+async def thesis_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    waiting[message.from_user.id] = {
+        "kind": "Tezis",
+        "file_type": "docx",
+        "pages": None,
+        "price": THESIS_PRICE,
+        "step": "topic",
+    }
+
+    await message.answer(
+        "📝 TEZIS\n\n"
+        "💰 Narxi: 5 000 so'm\n\n"
+        "📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# GLOSSARIY
+# =========================================================
+
+@router.message(F.text == "💡 Glossariy")
+async def glossary_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    waiting[message.from_user.id] = {
+        "kind": "Glossariy",
+        "file_type": "docx",
+        "pages": None,
+        "price": GLOSSARY_PRICE,
+        "step": "topic",
+    }
+
+    await message.answer(
+        "💡 GLOSSARIY\n\n"
+        "💰 Narxi: 4 000 so'm\n\n"
+        "📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# TEKIN TEST
+# =========================================================
+
+@router.message(F.text == "🧪 Test tuzish")
+async def test_start(message: Message):
+
+    await ensure_user(message.from_user)
+
+    waiting[message.from_user.id] = {
+        "kind": "Test tuzish",
+        "file_type": "docx",
+        "pages": None,
+        "price": 0,
+        "free_service": True,
+        "step": "topic",
+    }
+
+    await message.answer(
+        "🧪 TEST TUZISH\n\n"
+        "Bu xizmat bepul.\n\n"
+        "📝 Mavzuni yuboring:",
+    )
+
+
+# =========================================================
+# TEKIN TOOLS
+# =========================================================
 
 @router.message(F.text.in_(TOOLS.keys()))
 async def choose_tool(message: Message):
 
     await ensure_user(message.from_user)
 
-    waiting[message.from_user.id] = (
-        TOOLS[message.text],
-        "docx",
-    )
+    waiting[message.from_user.id] = {
+        "kind": TOOLS[message.text],
+        "file_type": "docx",
+        "price": 0,
+        "free_service": True,
+        "step": "topic",
+    }
 
     await message.answer(
         "📥 Matn yoki mavzuni yuboring:",
@@ -194,29 +589,33 @@ async def choose_tool(message: Message):
     )
 
 
-# =========================
-# AI YORDAMCHI
-# =========================
+# =========================================================
+# AI YORDAMCHI — TEKIN
+# =========================================================
 
 @router.message(F.text == "🤖 AI yordamchi")
 async def ai_helper(message: Message):
 
     await ensure_user(message.from_user)
 
-    waiting[message.from_user.id] = (
-        "__ai__",
-        "txt",
-    )
+    waiting[message.from_user.id] = {
+        "kind": "__ai__",
+        "file_type": "txt",
+        "price": 0,
+        "free_service": True,
+        "step": "topic",
+    }
 
     await message.answer(
-        "🤖 Savolingizni yuboring:",
+        "🤖 AI yordamchi\n\n"
+        "Savolingizni yuboring:",
         reply_markup=main_menu(),
     )
 
 
-# =========================
+# =========================================================
 # PROFIL
-# =========================
+# =========================================================
 
 @router.message(F.text == "👤 Profil")
 async def profile(message: Message):
@@ -230,14 +629,14 @@ async def profile(message: Message):
         f"🆔 ID: {user[0]}\n"
         f"👤 Username: @{user[1] or 'yo‘q'}\n"
         f"💰 Balans: {user[3]:,} so'm\n"
-        f"🎁 Bepul generatsiya: {user[4]}",
+        f"🎁 Bepul urinishlar: {user[4]} ta",
         reply_markup=main_menu(),
     )
 
 
-# =========================
+# =========================================================
 # BALANS
-# =========================
+# =========================================================
 
 @router.message(F.text == "💰 Balans")
 async def balance(message: Message):
@@ -267,17 +666,18 @@ async def balance(message: Message):
         f"💰 BALANS\n\n"
         f"Joriy balans: {user[3]:,} so'm\n"
         f"🎁 Bepul: {user[4]}\n\n"
-        f"1 ta xizmat: {GENERATION_PRICE_UZS:,} so'm\n\n"
-        f"To‘lov usulini tanlang:",
+        f"To‘lov tizimini tanlang:",
         reply_markup=keyboard,
     )
 
 
-# =========================
+# =========================================================
 # TO‘LOV
-# =========================
+# =========================================================
 
-@router.callback_query(F.data.in_({"pay_click", "pay_payme"}))
+@router.callback_query(
+    F.data.in_({"pay_click", "pay_payme"})
+)
 async def payment_callback(callback: CallbackQuery):
 
     provider = (
@@ -286,11 +686,14 @@ async def payment_callback(callback: CallbackQuery):
         else "payme"
     )
 
+    # Balans to'ldirish uchun summa
+    amount = 50000
+
     try:
 
         order_id, url = await create_payment(
             callback.from_user.id,
-            GENERATION_PRICE_UZS,
+            amount,
             provider,
         )
 
@@ -299,9 +702,9 @@ async def payment_callback(callback: CallbackQuery):
         await callback.message.answer(
             f"🧾 BUYURTMA\n\n"
             f"🆔 {order_id}\n"
-            f"💰 Summa: {GENERATION_PRICE_UZS:,} so'm\n"
+            f"💰 Summa: {amount:,} so'm\n"
             f"💳 To‘lov: {provider.upper()}\n\n"
-            f"👇 To‘lovni amalga oshirish:\n"
+            f"👇 To‘lovni amalga oshiring:\n"
             f"{url}",
             reply_markup=main_menu(),
         )
@@ -311,14 +714,14 @@ async def payment_callback(callback: CallbackQuery):
         print("PAYMENT ERROR:", repr(error))
 
         await callback.answer(
-            "To‘lov xizmatida xatolik.",
+            "❌ To‘lov xizmatida xatolik.",
             show_alert=True,
         )
 
 
-# =========================
+# =========================================================
 # REFERAL
-# =========================
+# =========================================================
 
 @router.message(F.text == "👥 Referal")
 async def referral(message: Message):
@@ -342,9 +745,9 @@ async def referral(message: Message):
     )
 
 
-# =========================
+# =========================================================
 # TARIX
-# =========================
+# =========================================================
 
 @router.message(F.text == "🕘 Tarix")
 async def user_history(message: Message):
@@ -366,14 +769,10 @@ async def user_history(message: Message):
 
     for row in rows:
 
-        kind = row[0]
-        topic = row[1]
-        status = row[2]
-
         text += (
-            f"📌 {kind}\n"
-            f"📝 {topic[:100]}\n"
-            f"📊 {status}\n\n"
+            f"📌 {row[0]}\n"
+            f"📝 {row[1][:100]}\n"
+            f"📊 {row[2]}\n\n"
         )
 
     await message.answer(
@@ -382,33 +781,38 @@ async def user_history(message: Message):
     )
 
 
-# =========================
+# =========================================================
 # YORDAM
-# =========================
+# =========================================================
 
 @router.message(F.text == "ℹ️ Yordam")
 async def help_command(message: Message):
 
     await message.answer(
         "ℹ️ YORDAM\n\n"
-        "🪄 Slayd — PowerPoint taqdimot\n"
-        "📄 Mustaqil ish — Word hujjat\n"
-        "🎓 Kurs ishi — kurs ishi\n"
-        "📑 Referat — referat\n"
-        "📰 Maqola — ilmiy maqola\n"
-        "📝 Tezis — tezis\n"
-        "💡 Glossariy — terminlar\n"
-        "🧪 Test — test savollari\n"
-        "🤖 AI yordamchi — savol-javob\n\n"
-        "💰 Balans bo‘limidan Click yoki Payme orqali "
-        "to‘lov qilishingiz mumkin.",
+        "🪄 Slayd — tanlangan bet va dizaynda\n"
+        "📄 Mustaqil ish — tanlangan betda\n"
+        "🎓 Kurs ishi — 25–60 bet\n"
+        "📑 Referat — 15–40 bet\n"
+        "📰 Maqola — 7 000 so'm\n"
+        "✍️ Konspekt — 500 so'm/bet\n"
+        "📝 Tezis — 5 000 so'm\n"
+        "💡 Glossariy — 4 000 so'm\n"
+        "🧪 Test — bepul\n"
+        "🤖 AI yordamchi — bepul\n"
+        "✂️ Qisqartirish — bepul\n"
+        "🔄 Qayta yozish — bepul\n"
+        "🌐 Tarjima — bepul\n"
+        "📋 Reja — bepul\n\n"
+        "🎁 Yangi foydalanuvchiga 2 ta bepul "
+        "generatsiya beriladi.",
         reply_markup=main_menu(),
     )
 
 
-# =========================
+# =========================================================
 # ADMIN
-# =========================
+# =========================================================
 
 @router.message(F.text == "/admin")
 async def admin_panel(message: Message):
@@ -435,14 +839,20 @@ async def admin_add_balance(message: Message):
     parts = message.text.split()
 
     if len(parts) != 3:
+
         await message.answer(
             "Format:\n"
             "/addbalance TELEGRAM_ID SUMMA"
         )
+
         return
 
     if not parts[1].isdigit() or not parts[2].isdigit():
-        await message.answer("❌ ID va summa raqam bo‘lishi kerak.")
+
+        await message.answer(
+            "❌ ID va summa raqam bo‘lishi kerak."
+        )
+
         return
 
     user_id = int(parts[1])
@@ -457,9 +867,9 @@ async def admin_add_balance(message: Message):
     )
 
 
-# =========================
+# =========================================================
 # FOYDALANUVCHI MATNI
-# =========================
+# =========================================================
 
 @router.message()
 async def process_text(message: Message):
@@ -469,9 +879,63 @@ async def process_text(message: Message):
     if user_id not in waiting:
         return
 
-    kind, file_type = waiting.pop(user_id)
+    data = waiting.get(user_id)
 
-    # AI yordamchi
+    # -----------------------------------------------------
+    # KONSPEKT BET SONI
+    # -----------------------------------------------------
+
+    if data.get("step") == "pages":
+
+        if not message.text.isdigit():
+
+            await message.answer(
+                "❌ Iltimos, faqat bet sonini yozing.\n"
+                "Masalan: 10"
+            )
+
+            return
+
+        pages = int(message.text)
+
+        if pages < 1 or pages > 100:
+
+            await message.answer(
+                "❌ Bet soni 1 dan 100 gacha bo‘lishi kerak."
+            )
+
+            return
+
+        data["pages"] = pages
+        data["price"] = pages * KONSPEKT_PER_PAGE
+        data["step"] = "topic"
+
+        waiting[user_id] = data
+
+        await message.answer(
+            f"✍️ Konspekt: {pages} bet\n"
+            f"💰 Narxi: {data['price']:,} so'm\n\n"
+            f"📝 Mavzuni yuboring:"
+        )
+
+        return
+
+    # -----------------------------------------------------
+    # MAVZU
+    # -----------------------------------------------------
+
+    waiting.pop(user_id, None)
+
+    kind = data["kind"]
+    file_type = data.get("file_type", "docx")
+    pages = data.get("pages")
+    price = data.get("price", 0)
+    design = data.get("design")
+
+    # -----------------------------------------------------
+    # AI YORDAMCHI
+    # -----------------------------------------------------
+
     if kind == "__ai__":
 
         try:
@@ -494,23 +958,36 @@ async def process_text(message: Message):
 
         return
 
-    # Balans / bepul limitni tekshirish
-    allowed = await consume(
-        user_id,
-        GENERATION_PRICE_UZS,
-    )
+    # -----------------------------------------------------
+    # PULLIK / BEPUL XIZMAT
+    # -----------------------------------------------------
 
-    if not allowed:
+    free_service = data.get("free_service", False)
 
-        await message.answer(
-            "❌ Bepul limit tugagan yoki balans yetarli emas.\n\n"
-            f"💰 1 ta xizmat: {GENERATION_PRICE_UZS:,} so'm\n\n"
-            f"Balans bo‘limidan Click yoki Payme orqali "
-            f"to‘lov qiling.",
-            reply_markup=main_menu(),
+    if not free_service:
+
+        allowed = await consume(
+            user_id,
+            price,
         )
 
-        return
+        if not allowed:
+
+            await message.answer(
+                "❌ Bepul urinishlaringiz tugagan "
+                "yoki balansingiz yetarli emas.\n\n"
+                f"💰 Ushbu xizmat narxi: "
+                f"{price:,} so'm\n\n"
+                f"Balans bo‘limidan hisobingizni "
+                f"to‘ldiring.",
+                reply_markup=main_menu(),
+            )
+
+            return
+
+    # -----------------------------------------------------
+    # STATUS
+    # -----------------------------------------------------
 
     status_message = await message.answer(
         "⏳ Tayyorlanmoqda...\n\n"
@@ -522,30 +999,49 @@ async def process_text(message: Message):
         body = await generate(
             kind,
             message.text,
+            pages=pages,
+            design=design,
         )
 
+        # -------------------------------------------------
+        # PPTX
+        # -------------------------------------------------
+
         if file_type == "pptx":
+
+            slide_count = pages or 10
 
             path = make_pptx(
                 message.text,
                 body,
-                10,
+                slide_count,
+                design or "🎓 Akademik",
             )
+
+        # -------------------------------------------------
+        # DOCX
+        # -------------------------------------------------
 
         else:
 
             path = make_docx(
                 message.text,
                 body,
+                kind=kind,
+                pages=pages,
             )
 
         await add_job(
             user_id,
             kind,
             message.text,
+            "done",
         )
 
-        await status_message.delete()
+        try:
+            await status_message.delete()
+        except Exception:
+            pass
 
         await message.answer_document(
             FSInputFile(path),
@@ -558,12 +1054,24 @@ async def process_text(message: Message):
 
     except Exception as error:
 
-        print("GENERATION ERROR:", repr(error))
-
-        await status_message.edit_text(
-            "❌ Hujjat yaratishda xatolik yuz berdi.\n"
-            "Iltimos, qaytadan urinib ko‘ring."
+        print(
+            "GENERATION ERROR:",
+            repr(error),
         )
+
+        # Agar AI xatolik bersa, pulni qaytarish
+        # keyingi bosqichda alohida refund mexanizmi
+        # qo‘shish mumkin.
+
+        try:
+
+            await status_message.edit_text(
+                "❌ Hujjat yaratishda xatolik yuz berdi.\n"
+                "Iltimos, qaytadan urinib ko‘ring."
+            )
+
+        except Exception:
+            pass
 
         await message.answer(
             "👇 Menyu:",
