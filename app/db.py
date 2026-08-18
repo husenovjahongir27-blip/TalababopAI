@@ -1,0 +1,53 @@
+import aiosqlite
+from datetime import datetime
+from .config import DB_PATH, FREE_GENERATIONS, REFERRAL_BONUS_UZS
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('CREATE TABLE IF NOT EXISTS users(user_id INTEGER PRIMARY KEY,username TEXT,first_name TEXT,balance INTEGER DEFAULT 0,free_left INTEGER DEFAULT 3,referral_id INTEGER,created_at TEXT)')
+        await db.execute('CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,kind TEXT,topic TEXT,status TEXT,created_at TEXT)')
+        await db.execute('CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,order_id TEXT UNIQUE,user_id INTEGER,amount INTEGER,provider TEXT,status TEXT DEFAULT "pending",provider_tx_id TEXT,prepare_id TEXT,created_at TEXT,paid_at TEXT)')
+        await db.commit()
+async def ensure_user(user,ref=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        r=await (await db.execute('SELECT user_id FROM users WHERE user_id=?',(user.id,))).fetchone()
+        if not r:
+            await db.execute('INSERT INTO users(user_id,username,first_name,free_left,referral_id,created_at) VALUES(?,?,?,?,?,?)',(user.id,user.username,user.first_name,FREE_GENERATIONS,ref,datetime.utcnow().isoformat()))
+            if ref and ref!=user.id:
+                await db.execute('UPDATE users SET balance=balance+? WHERE user_id=?',(REFERRAL_BONUS_UZS,ref))
+            await db.commit()
+async def get_user(uid):
+    async with aiosqlite.connect(DB_PATH) as db:return await (await db.execute('SELECT * FROM users WHERE user_id=?',(uid,))).fetchone()
+async def consume(uid,price):
+    async with aiosqlite.connect(DB_PATH) as db:
+        r=await (await db.execute('SELECT free_left,balance FROM users WHERE user_id=?',(uid,))).fetchone()
+        if not r:return False
+        if r[0]>0: await db.execute('UPDATE users SET free_left=free_left-1 WHERE user_id=?',(uid,))
+        elif r[1]>=price: await db.execute('UPDATE users SET balance=balance-? WHERE user_id=?',(price,uid))
+        else:return False
+        await db.commit();return True
+async def add_balance(uid,amount):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE users SET balance=balance+? WHERE user_id=?',(amount,uid));await db.commit()
+async def add_job(uid,kind,topic,status='done'):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO jobs(user_id,kind,topic,status,created_at) VALUES(?,?,?,?,?)',(uid,kind,topic,status,datetime.utcnow().isoformat()));await db.commit()
+async def create_order(oid,uid,amount,provider):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO orders(order_id,user_id,amount,provider,created_at) VALUES(?,?,?,?,?)',(oid,uid,amount,provider,datetime.utcnow().isoformat()));await db.commit()
+async def get_order(oid):
+    async with aiosqlite.connect(DB_PATH) as db:return await (await db.execute('SELECT order_id,user_id,amount,provider,status,provider_tx_id,prepare_id FROM orders WHERE order_id=?',(oid,))).fetchone()
+async def prepare_order(oid,tx):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('UPDATE orders SET provider_tx_id=?,prepare_id=? WHERE order_id=?',(str(tx),str(tx),oid));await db.commit()
+async def pay_order(oid,tx):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('BEGIN IMMEDIATE');r=await (await db.execute('SELECT user_id,amount,status FROM orders WHERE order_id=?',(oid,))).fetchone()
+        if not r: await db.rollback();return 'missing'
+        if r[2]=='paid': await db.commit();return 'already'
+        await db.execute('UPDATE orders SET status="paid",provider_tx_id=?,paid_at=? WHERE order_id=?',(str(tx),datetime.utcnow().isoformat(),oid))
+        await db.execute('UPDATE users SET balance=balance+? WHERE user_id=?',(r[1],r[0]));await db.commit();return 'paid'
+async def history(uid):
+    async with aiosqlite.connect(DB_PATH) as db:return await (await db.execute('SELECT kind,topic,status FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 10',(uid,))).fetchall()
+async def stats():
+    async with aiosqlite.connect(DB_PATH) as db:
+        u=(await (await db.execute('SELECT COUNT(*) FROM users')).fetchone())[0];j=(await (await db.execute('SELECT COUNT(*) FROM jobs')).fetchone())[0];p=(await (await db.execute('SELECT COALESCE(SUM(amount),0) FROM orders WHERE status="paid"')).fetchone())[0];return u,j,p
