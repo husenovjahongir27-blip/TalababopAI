@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uvicorn
 
 from aiogram import Bot, Dispatcher
@@ -34,17 +35,21 @@ async def main():
         drop_pending_updates=False,
     )
 
+    # Render bergan PORT'dan foydalanamiz
+    port = int(os.getenv("PORT", "8000"))
+
     server = uvicorn.Server(
         uvicorn.Config(
             app,
             host="0.0.0.0",
-            port=8000,
+            port=port,
             log_level="info",
         )
     )
 
     try:
         await server.serve()
+
     finally:
         await bot.delete_webhook()
         await bot.session.close()
