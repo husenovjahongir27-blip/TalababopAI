@@ -13,7 +13,6 @@ from .config import (
 # =========================
 
 async def init_db():
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute("""
@@ -62,11 +61,8 @@ async def init_db():
 # =========================
 
 async def ensure_user(user, ref=None):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
-        # Bir vaqtda kelgan ikkita so'rov ham
-        # UNIQUE xatosi bermasligi uchun INSERT OR IGNORE
         cursor = await db.execute(
             """
             INSERT OR IGNORE INTO users(
@@ -89,31 +85,26 @@ async def ensure_user(user, ref=None):
             ),
         )
 
-        # rowcount = 1 -> yangi foydalanuvchi qo'shildi
-        # rowcount = 0 -> foydalanuvchi avvaldan mavjud
+        # Faqat yangi foydalanuvchi qo'shilgan bo'lsa
+        # referral bonus beriladi.
         new_user = cursor.rowcount == 1
 
-        if new_user:
+        if new_user and ref and ref != user.id:
+            await db.execute(
+                """
+                UPDATE users
+                SET balance = balance + ?
+                WHERE user_id = ?
+                """,
+                (
+                    REFERRAL_BONUS_UZS,
+                    ref,
+                ),
+            )
 
-            # Referral faqat yangi foydalanuvchi uchun beriladi
-            if ref and ref != user.id:
-
-                await db.execute(
-                    """
-                    UPDATE users
-                    SET balance = balance + ?
-                    WHERE user_id = ?
-                    """,
-                    (
-                        REFERRAL_BONUS_UZS,
-                        ref,
-                    ),
-                )
-
-        else:
-
-            # Mavjud foydalanuvchining Telegram ma'lumotlarini
-            # yangilab turamiz.
+        # Mavjud foydalanuvchining Telegram ma'lumotlarini
+        # yangilab turamiz.
+        if not new_user:
             await db.execute(
                 """
                 UPDATE users
@@ -136,7 +127,6 @@ async def ensure_user(user, ref=None):
 # =========================
 
 async def get_user(uid):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         return await (
@@ -156,7 +146,6 @@ async def get_user(uid):
 # =========================
 
 async def consume(uid, price):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         r = await (
@@ -201,7 +190,6 @@ async def consume(uid, price):
             )
 
         else:
-
             return False
 
         await db.commit()
@@ -214,7 +202,6 @@ async def consume(uid, price):
 # =========================
 
 async def add_balance(uid, amount):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute(
@@ -242,7 +229,6 @@ async def add_job(
     topic,
     status="done",
 ):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute(
@@ -278,7 +264,6 @@ async def create_order(
     amount,
     provider,
 ):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute(
@@ -309,7 +294,6 @@ async def create_order(
 # =========================
 
 async def get_order(oid):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         return await (
@@ -336,7 +320,6 @@ async def get_order(oid):
 # =========================
 
 async def prepare_order(oid, tx):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute(
@@ -361,7 +344,6 @@ async def prepare_order(oid, tx):
 # =========================
 
 async def pay_order(oid, tx):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         await db.execute("BEGIN IMMEDIATE")
@@ -381,9 +363,7 @@ async def pay_order(oid, tx):
         ).fetchone()
 
         if not r:
-
             await db.rollback()
-
             return "missing"
 
         user_id, amount, status = r
@@ -391,9 +371,7 @@ async def pay_order(oid, tx):
         # To'lov avval amalga oshirilgan bo'lsa,
         # balansni ikkinchi marta oshirmaymiz.
         if status == "paid":
-
             await db.commit()
-
             return "already"
 
         await db.execute(
@@ -433,7 +411,6 @@ async def pay_order(oid, tx):
 # =========================
 
 async def history(uid):
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         return await (
@@ -458,7 +435,6 @@ async def history(uid):
 # =========================
 
 async def stats():
-
     async with aiosqlite.connect(DB_PATH) as db:
 
         users = (
