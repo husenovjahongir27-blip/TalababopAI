@@ -24,6 +24,7 @@ from .db import (
     history,
     stats,
     add_balance,
+    get_all_user_ids,
 )
 
 from .payments import create_payment
@@ -33,6 +34,7 @@ router = Router()
 
 waiting = {}
 
+admin_waiting = set()
 
 # =========================================================
 # NARXLAR
@@ -820,15 +822,218 @@ async def admin_panel(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    users, jobs, paid = await stats()
-
-    await message.answer(
-        f"🛠 ADMIN PANEL\n\n"
-        f"👥 Foydalanuvchilar: {users}\n"
-        f"📊 Generatsiyalar: {jobs}\n"
-        f"💰 To‘langan: {paid:,} so'm"
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👥 Foydalanuvchilar",
+                    callback_data="admin_users",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💰 Daromad",
+                    callback_data="admin_income",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📊 Statistika",
+                    callback_data="admin_stats",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📨 Xabar yuborish",
+                    callback_data="admin_broadcast",
+                )
+            ],
+        ]
     )
 
+    await message.answer(
+        "🛠 ADMIN PANEL\n\n"
+        "Kerakli bo‘limni tanlang:",
+        reply_markup=keyboard,
+    )
+
+
+# =========================================================
+# ADMIN — FOYDALANUVCHILAR
+# =========================================================
+
+@router.callback_query(F.data == "admin_users")
+async def admin_users(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer(
+            "❌ Ruxsat yo‘q.",
+            show_alert=True,
+        )
+        return
+
+    users, jobs, paid = await stats()
+
+    await callback.answer()
+
+    await callback.message.answer(
+        f"👥 FOYDALANUVCHILAR\n\n"
+        f"Jami foydalanuvchilar: {users} ta"
+    )
+
+
+# =========================================================
+# ADMIN — DAROMAD
+# =========================================================
+
+@router.callback_query(F.data == "admin_income")
+async def admin_income(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer(
+            "❌ Ruxsat yo‘q.",
+            show_alert=True,
+        )
+        return
+
+    users, jobs, paid = await stats()
+
+    await callback.answer()
+
+    await callback.message.answer(
+        f"💰 DAROMAD\n\n"
+        f"Jami tushum: {paid:,} so‘m"
+    )
+
+
+# =========================================================
+# ADMIN — STATISTIKA
+# =========================================================
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer(
+            "❌ Ruxsat yo‘q.",
+            show_alert=True,
+        )
+        return
+
+    users, jobs, paid = await stats()
+
+    await callback.answer()
+
+    await callback.message.answer(
+        f"📊 STATISTIKA\n\n"
+        f"👥 Foydalanuvchilar: {users} ta\n"
+        f"📄 Yaratilgan ishlar: {jobs} ta\n"
+        f"💰 Jami daromad: {paid:,} so‘m"
+    )
+
+
+# =========================================================
+# ADMIN — XABAR YUBORISH
+# =========================================================
+
+@router.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast_start(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer(
+            "❌ Ruxsat yo‘q.",
+            show_alert=True,
+        )
+        return
+
+    admin_waiting.add(callback.from_user.id)
+
+    await callback.answer()
+
+    await callback.message.answer(
+        "📨 XABAR YUBORISH\n\n"
+        "Barcha foydalanuvchilarga yubormoqchi "
+        "bo‘lgan xabaringizni yuboring.\n\n"
+        "Matn, rasm yoki boshqa Telegram xabari "
+        "bo‘lishi mumkin.\n\n"
+        "❌ Bekor qilish: /cancel"
+    )
+
+
+# =========================================================
+# ADMIN — XABARNI QABUL QILISH
+# =========================================================
+
+@router.message(
+    lambda message:
+    message.from_user.id in admin_waiting
+)
+async def admin_broadcast_message(message: Message):
+
+    admin_id = message.from_user.id
+
+    if admin_id not in ADMIN_IDS:
+        return
+
+    if message.text == "/cancel":
+
+        admin_waiting.discard(admin_id)
+
+        await message.answer(
+            "❌ Xabar yuborish bekor qilindi."
+        )
+
+        return
+
+    user_ids = await get_all_user_ids()
+
+    admin_waiting.discard(admin_id)
+
+    status_message = await message.answer(
+        f"📨 Xabar yuborilmoqda...\n\n"
+        f"👥 Jami: {len(user_ids)} ta"
+    )
+
+    sent = 0
+    failed = 0
+
+    for user_id in user_ids:
+
+        try:
+
+            await message.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+
+            sent += 1
+
+        except Exception as error:
+
+            print(
+                "BROADCAST ERROR:",
+                user_id,
+                repr(error),
+            )
+
+            failed += 1
+
+    try:
+
+        await status_message.edit_text(
+            f"✅ Xabar yuborish tugadi.\n\n"
+            f"📨 Yuborildi: {sent} ta\n"
+            f"❌ Yetkazilmadi: {failed} ta"
+        )
+
+    except Exception:
+        pass
+
+
+# =========================================================
+# ADMIN — BALANS QO‘SHISH
+# =========================================================
 
 @router.message(F.text.startswith("/addbalance "))
 async def admin_add_balance(message: Message):
@@ -863,9 +1068,8 @@ async def admin_add_balance(message: Message):
     await message.answer(
         f"✅ Balans qo‘shildi.\n\n"
         f"🆔 ID: {user_id}\n"
-        f"💰 +{amount:,} so'm"
+        f"💰 +{amount:,} so‘m"
     )
-
 
 # =========================================================
 # FOYDALANUVCHI MATNI
