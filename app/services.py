@@ -499,41 +499,620 @@ def make_docx(
 # SLAYD DIZAYNLARI
 # =========================================================
 
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+
+
 DESIGNS = {
+
     "🎓 Akademik": {
         "font": "Times New Roman",
         "title_size": 30,
         "body_size": 21,
+        "bg": RGBColor(245, 248, 252),
+        "primary": RGBColor(25, 72, 125),
+        "secondary": RGBColor(67, 114, 170),
+        "text": RGBColor(35, 45, 55),
+        "white": RGBColor(255, 255, 255),
     },
 
     "💼 Professional": {
         "font": "Arial",
         "title_size": 30,
         "body_size": 21,
+        "bg": RGBColor(248, 248, 248),
+        "primary": RGBColor(35, 42, 50),
+        "secondary": RGBColor(90, 100, 110),
+        "text": RGBColor(45, 45, 45),
+        "white": RGBColor(255, 255, 255),
     },
 
     "✨ Zamonaviy": {
         "font": "Aptos",
         "title_size": 32,
         "body_size": 22,
+        "bg": RGBColor(28, 32, 48),
+        "primary": RGBColor(230, 170, 70),
+        "secondary": RGBColor(80, 110, 180),
+        "text": RGBColor(245, 245, 248),
+        "white": RGBColor(255, 255, 255),
     },
 
     "🧊 Minimal": {
         "font": "Arial",
-        "title_size": 28,
+        "title_size": 29,
         "body_size": 20,
+        "bg": RGBColor(255, 255, 255),
+        "primary": RGBColor(40, 40, 40),
+        "secondary": RGBColor(180, 180, 180),
+        "text": RGBColor(65, 65, 65),
+        "white": RGBColor(255, 255, 255),
     },
 
     "🌈 Kreativ": {
         "font": "Aptos",
         "title_size": 32,
         "body_size": 22,
+        "bg": RGBColor(248, 244, 255),
+        "primary": RGBColor(105, 65, 170),
+        "secondary": RGBColor(220, 90, 160),
+        "text": RGBColor(55, 45, 70),
+        "white": RGBColor(255, 255, 255),
     },
 }
 
 
 # =========================================================
-# SLAYD
+# YORDAMCHI FUNKSIYALAR
+# =========================================================
+
+def set_slide_background(slide, color):
+    """
+    Slayd fonini belgilaydi.
+    """
+
+    background = slide.background
+    fill = background.fill
+    fill.solid()
+    fill.fore_color.rgb = color
+
+
+def add_shape(
+    slide,
+    shape_type,
+    left,
+    top,
+    width,
+    height,
+    color,
+):
+    """
+    Slaydga dekorativ shakl qo'shadi.
+    """
+
+    shape = slide.shapes.add_shape(
+        shape_type,
+        left,
+        top,
+        width,
+        height,
+    )
+
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = color
+
+    shape.line.fill.background()
+
+    return shape
+
+
+def add_title(
+    slide,
+    text,
+    font,
+    size,
+    color,
+    dark=False,
+):
+    """
+    Slayd sarlavhasini yaratadi.
+    """
+
+    box = slide.shapes.add_textbox(
+        Inches(0.75),
+        Inches(0.45),
+        Inches(11.8),
+        Inches(1.0),
+    )
+
+    frame = box.text_frame
+    frame.clear()
+    frame.word_wrap = True
+
+    paragraph = frame.paragraphs[0]
+
+    paragraph.alignment = PP_ALIGN.CENTER
+
+    run = paragraph.add_run()
+    run.text = text
+
+    run.font.name = font
+    run.font.size = PPTPt(size)
+    run.font.bold = True
+    run.font.color.rgb = color
+
+    return box
+
+
+def add_body(
+    slide,
+    lines,
+    font,
+    size,
+    color,
+):
+    """
+    Slayd asosiy matnini yaratadi.
+    """
+
+    box = slide.shapes.add_textbox(
+        Inches(1.0),
+        Inches(1.75),
+        Inches(11.25),
+        Inches(4.75),
+    )
+
+    frame = box.text_frame
+    frame.clear()
+    frame.word_wrap = True
+
+    for index, text in enumerate(lines):
+
+        paragraph = (
+            frame.paragraphs[0]
+            if index == 0
+            else frame.add_paragraph()
+        )
+
+        paragraph.text = text
+        paragraph.level = 0
+        paragraph.space_after = PPTPt(12)
+
+        for run in paragraph.runs:
+            run.font.name = font
+            run.font.size = PPTPt(size)
+            run.font.color.rgb = color
+
+    return box
+
+
+def add_slide_number(
+    slide,
+    number,
+    font,
+    color,
+):
+    """
+    Slayd raqamini chiqaradi.
+    """
+
+    box = slide.shapes.add_textbox(
+        Inches(11.9),
+        Inches(6.75),
+        Inches(0.7),
+        Inches(0.35),
+    )
+
+    frame = box.text_frame
+    frame.clear()
+
+    paragraph = frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.RIGHT
+
+    run = paragraph.add_run()
+    run.text = str(number)
+
+    run.font.name = font
+    run.font.size = PPTPt(12)
+    run.font.color.rgb = color
+
+
+# =========================================================
+# AKADEMIK
+# =========================================================
+
+def design_academic(
+    slide,
+    title,
+    lines,
+    number,
+    style,
+):
+    """
+    Rasmiy universitet/ilmiy uslub.
+    """
+
+    set_slide_background(
+        slide,
+        style["bg"],
+    )
+
+    # Yuqori ko'k chiziq
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0),
+        Inches(0),
+        Inches(13.333),
+        Inches(0.18),
+        style["primary"],
+    )
+
+    # Chap dekorativ blok
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0),
+        Inches(0.18),
+        Inches(0.18),
+        Inches(7.32),
+        style["secondary"],
+    )
+
+    add_title(
+        slide,
+        title,
+        style["font"],
+        style["title_size"],
+        style["primary"],
+    )
+
+    add_body(
+        slide,
+        lines,
+        style["font"],
+        style["body_size"],
+        style["text"],
+    )
+
+    # Pastki chiziq
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.75),
+        Inches(6.55),
+        Inches(11.6),
+        Inches(0.035),
+        style["secondary"],
+    )
+
+    add_slide_number(
+        slide,
+        number,
+        style["font"],
+        style["primary"],
+    )
+
+
+# =========================================================
+# PROFESSIONAL
+# =========================================================
+
+def design_professional(
+    slide,
+    title,
+    lines,
+    number,
+    style,
+):
+    """
+    Jiddiy va biznes uslubidagi dizayn.
+    """
+
+    set_slide_background(
+        slide,
+        style["bg"],
+    )
+
+    # Chap qora panel
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0),
+        Inches(0),
+        Inches(0.28),
+        Inches(7.5),
+        style["primary"],
+    )
+
+    # Sarlavha tagidagi chiziq
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.8),
+        Inches(1.38),
+        Inches(11.6),
+        Inches(0.06),
+        style["primary"],
+    )
+
+    add_title(
+        slide,
+        title,
+        style["font"],
+        style["title_size"],
+        style["primary"],
+    )
+
+    add_body(
+        slide,
+        lines,
+        style["font"],
+        style["body_size"],
+        style["text"],
+    )
+
+    # Pastki kichik dekor
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.8),
+        Inches(6.65),
+        Inches(1.4),
+        Inches(0.08),
+        style["secondary"],
+    )
+
+    add_slide_number(
+        slide,
+        number,
+        style["font"],
+        style["primary"],
+    )
+
+
+# =========================================================
+# ZAMONAVIY
+# =========================================================
+
+def design_modern(
+    slide,
+    title,
+    lines,
+    number,
+    style,
+):
+    """
+    To'q fonli zamonaviy dizayn.
+    """
+
+    set_slide_background(
+        slide,
+        style["bg"],
+    )
+
+    # Katta dekorativ doira
+    circle = add_shape(
+        slide,
+        MSO_SHAPE.OVAL,
+        Inches(10.8),
+        Inches(-1.1),
+        Inches(3.2),
+        Inches(3.2),
+        style["secondary"],
+    )
+
+    # Shaffoflikni imkon qadar kamaytirish
+    try:
+        circle.fill.transparency = 20
+    except Exception:
+        pass
+
+    # Oltin chiziq
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.8),
+        Inches(1.42),
+        Inches(2.2),
+        Inches(0.08),
+        style["primary"],
+    )
+
+    add_title(
+        slide,
+        title,
+        style["font"],
+        style["title_size"],
+        style["primary"],
+    )
+
+    add_body(
+        slide,
+        lines,
+        style["font"],
+        style["body_size"],
+        style["text"],
+    )
+
+    # Pastki dekor
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0),
+        Inches(7.25),
+        Inches(13.333),
+        Inches(0.25),
+        style["primary"],
+    )
+
+    add_slide_number(
+        slide,
+        number,
+        style["font"],
+        style["primary"],
+    )
+
+
+# =========================================================
+# MINIMAL
+# =========================================================
+
+def design_minimal(
+    slide,
+    title,
+    lines,
+    number,
+    style,
+):
+    """
+    Juda toza va sodda dizayn.
+    """
+
+    set_slide_background(
+        slide,
+        style["bg"],
+    )
+
+    # Kichik nuqta
+    add_shape(
+        slide,
+        MSO_SHAPE.OVAL,
+        Inches(0.75),
+        Inches(0.55),
+        Inches(0.18),
+        Inches(0.18),
+        style["primary"],
+    )
+
+    add_title(
+        slide,
+        title,
+        style["font"],
+        style["title_size"],
+        style["primary"],
+    )
+
+    # Ingichka chiziq
+    add_shape(
+        slide,
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.8),
+        Inches(1.45),
+        Inches(11.7),
+        Inches(0.025),
+        style["secondary"],
+    )
+
+    add_body(
+        slide,
+        lines,
+        style["font"],
+        style["body_size"],
+        style["text"],
+    )
+
+    add_slide_number(
+        slide,
+        number,
+        style["font"],
+        style["secondary"],
+    )
+
+
+# =========================================================
+# KREATIV
+# =========================================================
+
+def design_creative(
+    slide,
+    title,
+    lines,
+    number,
+    style,
+):
+    """
+    Rangli va kreativ talabalar dizayni.
+    """
+
+    set_slide_background(
+        slide,
+        style["bg"],
+    )
+
+    # Binafsha yuqori blok
+    add_shape(
+        slide,
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(0.55),
+        Inches(0.35),
+        Inches(12.2),
+        Inches(1.15),
+        style["primary"],
+    )
+
+    add_title(
+        slide,
+        title,
+        style["font"],
+        style["title_size"],
+        style["white"],
+    )
+
+    # O'ng yuqoridagi dekor
+    add_shape(
+        slide,
+        MSO_SHAPE.OVAL,
+        Inches(11.75),
+        Inches(-0.45),
+        Inches(1.6),
+        Inches(1.6),
+        style["secondary"],
+    )
+
+    # Matn uchun oq blok
+    body_shape = add_shape(
+        slide,
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(0.75),
+        Inches(1.85),
+        Inches(11.8),
+        Inches(4.7),
+        style["white"],
+    )
+
+    # Matn blokining chizig'ini olib tashlash
+    body_shape.line.fill.background()
+
+    add_body(
+        slide,
+        lines,
+        style["font"],
+        style["body_size"],
+        style["text"],
+    )
+
+    # Pastki dekor
+    add_shape(
+        slide,
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(0.75),
+        Inches(6.75),
+        Inches(1.2),
+        Inches(0.18),
+        style["secondary"],
+    )
+
+    add_slide_number(
+        slide,
+        number,
+        style["font"],
+        style["primary"],
+    )
+
+
+# =========================================================
+# SLAYD YARATISH
 # =========================================================
 
 def make_pptx(
@@ -569,13 +1148,13 @@ def make_pptx(
         if x.strip()
     ]
 
+    # 1–30 oralig'ida
     n = max(
         1,
         min(int(n), 30),
     )
 
-    # Agar AI kam matn qaytarsa,
-    # mavjud matnni keraksiz takrorlamaymiz.
+    # Matnni slaydlarga taqsimlash
     per_slide = max(
         1,
         (len(lines) + n - 1) // n,
@@ -600,108 +1179,68 @@ def make_pptx(
             presentation.slide_layouts[6]
         )
 
-        # -------------------------
-        # TITLE
-        # -------------------------
+        # Tanlangan dizayn
+        if design == "🎓 Akademik":
 
-        title_box = slide.shapes.add_textbox(
-            Inches(0.7),
-            Inches(0.4),
-            Inches(11.9),
-            Inches(1.0),
-        )
-
-        title_frame = title_box.text_frame
-
-        title_frame.clear()
-
-        paragraph = title_frame.paragraphs[0]
-
-        paragraph.alignment = PP_ALIGN.CENTER
-
-        run = paragraph.add_run()
-
-        run.text = (
-            title
-            if i == 0
-            else f"{title} — {i + 1}"
-        )
-
-        run.font.name = selected["font"]
-        run.font.size = PPTPt(
-            selected["title_size"]
-        )
-        run.font.bold = True
-
-        # -------------------------
-        # BODY
-        # -------------------------
-
-        body_box = slide.shapes.add_textbox(
-            Inches(1.0),
-            Inches(1.7),
-            Inches(11.3),
-            Inches(5.0),
-        )
-
-        frame = body_box.text_frame
-
-        frame.clear()
-
-        frame.word_wrap = True
-
-        for j, text in enumerate(chunk):
-
-            paragraph = (
-                frame.paragraphs[0]
-                if j == 0
-                else frame.add_paragraph()
+            design_academic(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                selected,
             )
 
-            paragraph.text = text
+        elif design == "💼 Professional":
 
-            paragraph.level = 0
+            design_professional(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                selected,
+            )
 
-            paragraph.space_after = PPTPt(10)
+        elif design == "✨ Zamonaviy":
 
-            for run in paragraph.runs:
+            design_modern(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                selected,
+            )
 
-                run.font.name = selected["font"]
+        elif design == "🧊 Minimal":
 
-                run.font.size = PPTPt(
-                    selected["body_size"]
-                )
+            design_minimal(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                selected,
+            )
 
-        # -------------------------
-        # SLIDE NUMBER
-        # -------------------------
+        elif design == "🌈 Kreativ":
 
-        number_box = slide.shapes.add_textbox(
-            Inches(12.0),
-            Inches(6.8),
-            Inches(0.7),
-            Inches(0.4),
-        )
+            design_creative(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                selected,
+            )
 
-        number_frame = number_box.text_frame
+        else:
 
-        number_frame.clear()
-
-        number_paragraph = (
-            number_frame.paragraphs[0]
-        )
-
-        number_paragraph.alignment = PP_ALIGN.RIGHT
-
-        number_run = (
-            number_paragraph.add_run()
-        )
-
-        number_run.text = str(i + 1)
-
-        number_run.font.name = selected["font"]
-        number_run.font.size = PPTPt(12)
+            design_academic(
+                slide,
+                title if i == 0 else f"{title} — {i + 1}",
+                chunk,
+                i + 1,
+                DESIGNS["🎓 Akademik"],
+            )
 
     presentation.save(path)
 
+    return path
     return path
