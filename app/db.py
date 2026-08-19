@@ -469,3 +469,16 @@ async def stats():
         )[0]
 
         return users, jobs, paid
+        # =========================
+# ALL USERS
+# =========================
+
+async def get_all_user_ids():
+    async with aiosqlite.connect(DB_PATH) as db:
+        rows = await (
+            await db.execute(
+                "SELECT user_id FROM users"
+            )
+        ).fetchall()
+
+        return [row[0] for row in rows]
