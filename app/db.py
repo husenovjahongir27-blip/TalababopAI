@@ -89,18 +89,26 @@ async def ensure_user(user, ref=None):
         # referral bonus beriladi.
         new_user = cursor.rowcount == 1
 
-        if new_user and ref and ref != user.id:
-            await db.execute(
-                """
-                UPDATE users
-                SET balance = balance + ?
-                WHERE user_id = ?
-                """,
-                (
-                    REFERRAL_BONUS_UZS,
-                    ref,
-                ),
-            )
+    if new_user and ref and ref != user.id:
+
+    ref_cursor = await db.execute(
+        """
+        UPDATE users
+        SET balance = balance + ?
+        WHERE user_id = ?
+        """,
+        (
+            REFERRAL_BONUS_UZS,
+            ref,
+        ),
+    )
+
+    # Referal egasi mavjud bo'lsa bonus berildi
+    if ref_cursor.rowcount > 0:
+        print(
+            f"REFERRAL BONUS: "
+            f"{ref} +{REFERRAL_BONUS_UZS} so'm"
+        )
 
         # Mavjud foydalanuvchining Telegram ma'lumotlarini
         # yangilab turamiz.
