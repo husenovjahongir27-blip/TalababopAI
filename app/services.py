@@ -1243,4 +1243,3 @@ def make_pptx(
     presentation.save(path)
 
     return path
-    return path
