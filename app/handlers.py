@@ -716,17 +716,13 @@ async def balance(message: Message):
 @router.callback_query(F.data == "pay_card")
 async def pay_card(callback: CallbackQuery):
 
-    if callback.from_user.id not in ADMIN_IDS:
-
-        pass
-
     await callback.answer()
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📋 /chekyubor",
+                    text="📋 Chek yuborish",
                     callback_data="card_cheque",
                 )
             ],
@@ -740,43 +736,43 @@ async def pay_card(callback: CallbackQuery):
     )
 
     await callback.message.answer(
-        "💳 PLASTIK KARTA ORQALI BALANS TO‘LDIRISH\n\n"
+        "💳 PLASTIK KARTA ORQALI BALANSNI TO‘LDIRISH\n\n"
 
         "1️⃣ TO‘LOV:\n"
-        "Quyidagi bank hisob raqamlaridan biriga "
-        "kerakli summani o‘tkazing.\n\n"
+        "Quyidagi kartalardan biriga kerakli summani "
+        "o‘tkazing.\n\n"
 
-        "🏦 Karta raqami:\n"
+        "🏦 KARTA RAQAMI:\n"
         "<code>5614683113155618</code>\n"
         "👤 Karta egasi: Nilufar Xudoyberdieva\n\n"
 
-        "🏦 Karta raqami:\n"
+        "🏦 KARTA RAQAMI:\n"
         "<code>5614681259285512</code>\n"
         "👤 Karta egasi: Shahzod Alimardanov\n\n"
 
         "2️⃣ BUYRUQ:\n"
-        "To‘lovni amalga oshirgandan so‘ng botga:\n"
-        "<code>/chekyubor</code>\n"
-        "buyrug‘ini yuboring.\n\n"
+        "To‘lovni amalga oshirgandan so‘ng botga "
+        "<code>/chekyubor</code> buyrug‘ini yuboring.\n\n"
 
         "3️⃣ CHEKNI YUBORING:\n"
-        "To‘lov chekining rasmini yoki faylini botga yuboring.\n\n"
+        "To‘lov chekini rasm yoki fayl ko‘rinishida yuboring.\n\n"
 
         "❗️ ESLATMALAR:\n"
-        "1. Chekni yubormasangiz, balansingiz to‘ldirilmaydi.\n"
+        "1. Chek yuborilmasa, balans to‘ldirilmaydi.\n"
         "2. Cheklar administrator tomonidan qo‘lda tekshiriladi.\n"
         "3. Tekshirish biroz vaqt olishi mumkin.\n"
         "4. To‘lov vaqti ko‘rinmasa yoki aniq bo‘lmasa, "
         "to‘lov qabul qilinmaydi.\n\n"
 
         "Muammo bo‘lsa, bot administratoriga murojaat qiling.",
+
         reply_markup=keyboard,
         parse_mode="HTML",
     )
 
 
 # =========================================================
-# CHEK YUBORISHNI BOSHLASH
+# CHEK YUBORISH
 # =========================================================
 
 @router.callback_query(F.data == "card_cheque")
@@ -786,12 +782,15 @@ async def card_cheque_start(callback: CallbackQuery):
 
     await callback.message.answer(
         "📤 CHEK YUBORISH\n\n"
-        "Avval <code>/chekyubor</code> buyrug‘ini yuboring.\n\n"
-        "Keyin to‘lov chekini rasm yoki fayl ko‘rinishida yuboring.",
+        "To‘lov chekini yuborish uchun:\n\n"
+        "1️⃣ <code>/chekyubor</code> buyrug‘ini yuboring.\n"
+        "2️⃣ Keyin to‘lov chekini rasm yoki fayl ko‘rinishida yuboring.\n\n"
+        "❗️ Chek administrator tomonidan tekshiriladi.\n"
+        "Tasdiqlangandan so‘ng balansingiz to‘ldiriladi.",
         parse_mode="HTML",
+        reply_markup=main_menu(),
     )
-
-
+    
 # =========================================================
 # CLICK / PAYME — SUMMA KIRITISH
 # =========================================================
