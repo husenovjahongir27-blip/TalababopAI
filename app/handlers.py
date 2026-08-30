@@ -1,19 +1,38 @@
-import asyncio
-
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.exceptions import TelegramRetryAfter
-from aiogram.types import (
-    Message,
-    CallbackQuery,
-    FSInputFile,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-)
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 
 from .config import (
+    BOT_NAME,
+    REFERRAL_BONUS_UZS,
+    ADMIN_IDS,
+)
+
+from .db import (
+    ensure_user,
+    get_user,
+    consume,
+    add_job,
+    history,
+    stats,
+    add_balance,
+    get_all_user_ids,
+)
+
+from .payments import create_payment
+from .services import generate, answer, make_docx, make_pptx
+
+router = Router()
+
+waiting = {}
+admin_waiting = set()
+
+
+# =========================================================
+# TO‘LOV HOLATLARI
+# =========================================================
+
+class PaymentState(StatesGroup):
+    waiting_amount = State()
     BOT_NAME,
     REFERRAL_BONUS_UZS,
     ADMIN_IDS,
@@ -640,6 +659,14 @@ async def profile(message: Message):
 
 
 # =========================================================
+# TO'LOV HOLATLARI
+# =========================================================
+
+class PaymentState(StatesGroup):
+    waiting_amount = State()
+
+
+# =========================================================
 # BALANS
 # =========================================================
 
@@ -652,6 +679,12 @@ async def balance(message: Message):
 
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💳 Karta orqali to‘ldirish",
+                    callback_data="pay_card",
+                )
+            ],
             [
                 InlineKeyboardButton(
                     text="💳 Click",
@@ -669,21 +702,107 @@ async def balance(message: Message):
 
     await message.answer(
         f"💰 BALANS\n\n"
-        f"Joriy balans: {user[3]:,} so'm\n"
+        f"Joriy balans: {user[3]:,} so‘m\n"
         f"🎁 Bepul: {user[4]}\n\n"
-        f"To‘lov tizimini tanlang:",
+        f"Balansni to‘ldirish usulini tanlang:",
         reply_markup=keyboard,
     )
 
 
 # =========================================================
-# TO‘LOV
+# KARTA ORQALI TO'LDIRISH
+# =========================================================
+
+@router.callback_query(F.data == "pay_card")
+async def pay_card(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+
+        pass
+
+    await callback.answer()
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📋 /chekyubor",
+                    callback_data="card_cheque",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Orqaga",
+                    callback_data="back_balance",
+                )
+            ],
+        ]
+    )
+
+    await callback.message.answer(
+        "💳 PLASTIK KARTA ORQALI BALANS TO‘LDIRISH\n\n"
+
+        "1️⃣ TO‘LOV:\n"
+        "Quyidagi bank hisob raqamlaridan biriga "
+        "kerakli summani o‘tkazing.\n\n"
+
+        "🏦 Karta raqami:\n"
+        "<code>5614683113155618</code>\n"
+        "👤 Karta egasi: Nilufar Xudoyberdieva\n\n"
+
+        "🏦 Karta raqami:\n"
+        "<code>5614681259285512</code>\n"
+        "👤 Karta egasi: Shahzod Alimardanov\n\n"
+
+        "2️⃣ BUYRUQ:\n"
+        "To‘lovni amalga oshirgandan so‘ng botga:\n"
+        "<code>/chekyubor</code>\n"
+        "buyrug‘ini yuboring.\n\n"
+
+        "3️⃣ CHEKNI YUBORING:\n"
+        "To‘lov chekining rasmini yoki faylini botga yuboring.\n\n"
+
+        "❗️ ESLATMALAR:\n"
+        "1. Chekni yubormasangiz, balansingiz to‘ldirilmaydi.\n"
+        "2. Cheklar administrator tomonidan qo‘lda tekshiriladi.\n"
+        "3. Tekshirish biroz vaqt olishi mumkin.\n"
+        "4. To‘lov vaqti ko‘rinmasa yoki aniq bo‘lmasa, "
+        "to‘lov qabul qilinmaydi.\n\n"
+
+        "Muammo bo‘lsa, bot administratoriga murojaat qiling.",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# CHEK YUBORISHNI BOSHLASH
+# =========================================================
+
+@router.callback_query(F.data == "card_cheque")
+async def card_cheque_start(callback: CallbackQuery):
+
+    await callback.answer()
+
+    await callback.message.answer(
+        "📤 CHEK YUBORISH\n\n"
+        "Avval <code>/chekyubor</code> buyrug‘ini yuboring.\n\n"
+        "Keyin to‘lov chekini rasm yoki fayl ko‘rinishida yuboring.",
+        parse_mode="HTML",
+    )
+
+
+# =========================================================
+# CLICK / PAYME — SUMMA KIRITISH
 # =========================================================
 
 @router.callback_query(
     F.data.in_({"pay_click", "pay_payme"})
 )
-async def payment_callback(callback: CallbackQuery):
+async def payment_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
 
     provider = (
         "click"
@@ -691,37 +810,145 @@ async def payment_callback(callback: CallbackQuery):
         else "payme"
     )
 
-    # Balans to'ldirish uchun summa
-    amount = 50000
+    await state.update_data(provider=provider)
+    await state.set_state(PaymentState.waiting_amount)
+
+    await callback.answer()
+
+    await callback.message.answer(
+        f"💳 {provider.upper()} ORQALI BALANS TO‘LDIRISH\n\n"
+        f"💰 To‘ldirmoqchi bo‘lgan summangizni kiriting.\n\n"
+        f"Masalan:\n"
+        f"10000\n"
+        f"25000\n"
+        f"50000\n"
+        f"100000\n\n"
+        f"❗️ Minimal summa: 1 000 so‘m\n\n"
+        f"❌ Bekor qilish: /cancel"
+    )
+
+
+# =========================================================
+# CLICK / PAYME — SUMMANI QABUL QILISH
+# =========================================================
+
+@router.message(PaymentState.waiting_amount)
+async def payment_amount(
+    message: Message,
+    state: FSMContext,
+):
+
+    if message.text == "/cancel":
+
+        await state.clear()
+
+        await message.answer(
+            "❌ To‘lov bekor qilindi.",
+            reply_markup=main_menu(),
+        )
+
+        return
+
+    if not message.text:
+
+        await message.answer(
+            "❌ Iltimos, summani raqam bilan kiriting.\n\n"
+            "Masalan: 25000"
+        )
+
+        return
+
+    # Bo'sh joy va vergullarni olib tashlash
+    text = (
+        message.text
+        .replace(" ", "")
+        .replace(",", "")
+        .replace(".", "")
+    )
+
+    if not text.isdigit():
+
+        await message.answer(
+            "❌ Summa noto‘g‘ri.\n\n"
+            "Faqat raqam kiriting.\n"
+            "Masalan: 25000"
+        )
+
+        return
+
+    amount = int(text)
+
+    if amount < 1000:
+
+        await message.answer(
+            "❌ Minimal to‘lov: 1 000 so‘m.\n\n"
+            "Boshqa summani kiriting:"
+        )
+
+        return
+
+    data = await state.get_data()
+
+    provider = data.get("provider")
+
+    if provider not in {"click", "payme"}:
+
+        await state.clear()
+
+        await message.answer(
+            "❌ To‘lov tizimi aniqlanmadi.",
+            reply_markup=main_menu(),
+        )
+
+        return
 
     try:
 
         order_id, url = await create_payment(
-            callback.from_user.id,
+            message.from_user.id,
             amount,
             provider,
         )
 
-        await callback.answer()
+        await state.clear()
 
-        await callback.message.answer(
+        await message.answer(
             f"🧾 BUYURTMA\n\n"
             f"🆔 {order_id}\n"
-            f"💰 Summa: {amount:,} so'm\n"
+            f"💰 Summa: {amount:,} so‘m\n"
             f"💳 To‘lov: {provider.upper()}\n\n"
-            f"👇 To‘lovni amalga oshiring:\n"
+            f"👇 To‘lovni amalga oshirish uchun "
+            f"quyidagi havolani bosing:\n\n"
             f"{url}",
             reply_markup=main_menu(),
         )
 
     except Exception as error:
 
-        print("PAYMENT ERROR:", repr(error))
-
-        await callback.answer(
-            "❌ To‘lov xizmatida xatolik.",
-            show_alert=True,
+        print(
+            "PAYMENT ERROR:",
+            repr(error),
         )
+
+        await state.clear()
+
+        await message.answer(
+            "❌ To‘lov xizmatida xatolik yuz berdi.\n"
+            "Keyinroq qayta urinib ko‘ring.",
+            reply_markup=main_menu(),
+        )
+
+
+# =========================================================
+# BALANSGA QAYTISH
+# =========================================================
+
+@router.callback_query(F.data == "back_balance")
+async def back_balance(callback: CallbackQuery):
+
+    await callback.answer()
+
+    await balance(callback.message)
 
 
 # =========================================================
