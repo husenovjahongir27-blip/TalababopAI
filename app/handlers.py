@@ -34,25 +34,6 @@ admin_waiting = set()
 class PaymentState(StatesGroup):
     waiting_amount = State()
 
-from .db import (
-    ensure_user,
-    get_user,
-    consume,
-    add_job,
-    history,
-    stats,
-    add_balance,
-    get_all_user_ids,
-)
-
-from .payments import create_payment
-from .services import generate, answer, make_docx, make_pptx
-
-router = Router()
-
-waiting = {}
-
-admin_waiting = set()
 
 # =========================================================
 # NARXLAR
