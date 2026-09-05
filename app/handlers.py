@@ -743,12 +743,8 @@ async def pay_card(callback: CallbackQuery):
         "o‘tkazing.\n\n"
 
         "🏦 KARTA RAQAMI:\n"
-        "<code>5614683113155618</code>\n"
-        "👤 Karta egasi: Nilufar Xudoyberdieva\n\n"
-
-        "🏦 KARTA RAQAMI:\n"
-        "<code>5614681259285512</code>\n"
-        "👤 Karta egasi: Shahzod Alimardanov\n\n"
+"<code>9860080309135756</code>\n"
+"👤 Karta egasi: Husenov.J\n\n"
 
         "2️⃣ BUYRUQ:\n"
         "To‘lovni amalga oshirgandan so‘ng botga "
