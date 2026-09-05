@@ -33,10 +33,6 @@ admin_waiting = set()
 
 class PaymentState(StatesGroup):
     waiting_amount = State()
-    BOT_NAME,
-    REFERRAL_BONUS_UZS,
-    ADMIN_IDS,
-)
 
 from .db import (
     ensure_user,
