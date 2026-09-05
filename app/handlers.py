@@ -704,7 +704,7 @@ async def balance(message: Message):
         f"💰 BALANS\n\n"
         f"Joriy balans: {user[3]:,} so‘m\n"
         f"🎁 Bepul: {user[4]}\n\n"
-        f"Balansni to‘ldirish usulini tanlang:",
+        f"To‘lov tizimini tanlang:",
         reply_markup=keyboard,
     )
 
