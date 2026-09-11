@@ -17,9 +17,13 @@ from .db import (
     stats,
     add_balance,
     get_all_user_ids,
+    create_order,
+    get_order,
+    pay_order,
+    reject_order,
 )
 
-from .payments import create_payment
+from .payments import create_payment, order_id as make_order_id
 from .services import generate, answer, make_docx, make_pptx
 
 router = Router()
@@ -642,6 +646,7 @@ async def profile(message: Message):
 
 class PaymentState(StatesGroup):
     waiting_amount = State()
+    waiting_cheque = State()
 
 
 # =========================================================
@@ -750,21 +755,28 @@ async def pay_card(callback: CallbackQuery):
 # =========================================================
 
 @router.callback_query(F.data == "card_cheque")
-async def card_cheque_start(callback: CallbackQuery):
+async def card_cheque_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
 
     await callback.answer()
 
+    await state.update_data(provider="card")
+    await state.set_state(PaymentState.waiting_amount)
+
     await callback.message.answer(
         "📤 CHEK YUBORISH\n\n"
-        "To‘lov chekini yuborish uchun:\n\n"
-        "1️⃣ <code>/chekyubor</code> buyrug‘ini yuboring.\n"
-        "2️⃣ Keyin to‘lov chekini rasm yoki fayl ko‘rinishida yuboring.\n\n"
-        "❗️ Chek administrator tomonidan tekshiriladi.\n"
-        "Tasdiqlangandan so‘ng balansingiz to‘ldiriladi.",
-        parse_mode="HTML",
-        reply_markup=main_menu(),
+        "💰 Karta orqali o‘tkazgan summangizni kiriting.\n\n"
+        "Masalan:\n"
+        "10000\n"
+        "25000\n"
+        "50000\n\n"
+        "❗️ Minimal summa: 1 000 so‘m\n\n"
+        "❌ Bekor qilish: /cancel"
     )
-    
+
+
 # =========================================================
 # CLICK / PAYME — SUMMA KIRITISH
 # =========================================================
@@ -864,6 +876,37 @@ async def payment_amount(
 
     provider = data.get("provider")
 
+    if provider == "card":
+
+        oid = make_order_id(message.from_user.id)
+
+        await create_order(
+            oid,
+            message.from_user.id,
+            amount,
+            "card",
+        )
+
+        await state.update_data(
+            provider="card",
+            oid=oid,
+            amount=amount,
+        )
+        await state.set_state(PaymentState.waiting_cheque)
+
+        await message.answer(
+            "🏦 KARTA RAQAMI:\n"
+            "<code>9860080309135756</code>\n"
+            "👤 Karta egasi: Husenov.J\n\n"
+            f"💰 Summa: {amount:,} so‘m\n\n"
+            "To‘lovni amalga oshirgach, chekni (rasm yoki "
+            "fayl ko‘rinishida) shu yerga yuboring.\n\n"
+            "❌ Bekor qilish: /cancel",
+            parse_mode="HTML",
+        )
+
+        return
+
     if provider not in {"click", "payme"}:
 
         await state.clear()
@@ -922,6 +965,260 @@ async def back_balance(callback: CallbackQuery):
     await callback.answer()
 
     await balance(callback.message)
+
+
+# =========================================================
+# KARTA — CHEKNI BEKOR QILISH
+# =========================================================
+
+@router.message(
+    PaymentState.waiting_cheque,
+    F.text == "/cancel",
+)
+async def cheque_cancel(
+    message: Message,
+    state: FSMContext,
+):
+
+    await state.clear()
+
+    await message.answer(
+        "❌ To‘lov bekor qilindi.",
+        reply_markup=main_menu(),
+    )
+
+
+# =========================================================
+# KARTA — CHEKNI QABUL QILISH VA ADMINGA YUBORISH
+# =========================================================
+
+@router.message(
+    PaymentState.waiting_cheque,
+    F.photo | F.document,
+)
+async def cheque_received(
+    message: Message,
+    state: FSMContext,
+):
+
+    data = await state.get_data()
+
+    oid = data.get("oid")
+    amount = data.get("amount")
+
+    if not oid:
+
+        await state.clear()
+
+        await message.answer(
+            "❌ Buyurtma topilmadi. Qaytadan urinib ko‘ring.",
+            reply_markup=main_menu(),
+        )
+
+        return
+
+    caption = (
+        f"🧾 YANGI CHEK\n\n"
+        f"🆔 Buyurtma: {oid}\n"
+        f"👤 Foydalanuvchi: {message.from_user.id} "
+        f"(@{message.from_user.username or 'yo‘q'})\n"
+        f"💰 Summa: {amount:,} so‘m"
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Tasdiqlash",
+                    callback_data=f"cheque_approve:{oid}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Rad etish",
+                    callback_data=f"cheque_reject:{oid}",
+                ),
+            ]
+        ]
+    )
+
+    for admin_id in ADMIN_IDS:
+
+        try:
+
+            if message.photo:
+
+                await message.bot.send_photo(
+                    admin_id,
+                    message.photo[-1].file_id,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+
+            else:
+
+                await message.bot.send_document(
+                    admin_id,
+                    message.document.file_id,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+
+        except Exception as error:
+
+            print(
+                "CHEQUE FORWARD ERROR:",
+                repr(error),
+            )
+
+    await state.clear()
+
+    await message.answer(
+        "✅ Chekingiz qabul qilindi.\n\n"
+        "Admin tekshirgandan so‘ng balansingiz to‘ldiriladi.",
+        reply_markup=main_menu(),
+    )
+
+
+# =========================================================
+# KARTA — NOTO'G'RI KONTENT
+# =========================================================
+
+@router.message(PaymentState.waiting_cheque)
+async def cheque_wrong_content(message: Message):
+
+    await message.answer(
+        "❌ Iltimos, chekni rasm yoki fayl ko‘rinishida yuboring.\n\n"
+        "❌ Bekor qilish: /cancel"
+    )
+
+
+# =========================================================
+# KARTA — ADMIN TASDIQLASHI
+# =========================================================
+
+@router.callback_query(F.data.startswith("cheque_approve:"))
+async def cheque_approve(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+
+        await callback.answer(
+            "⛔️ Ruxsat yo‘q",
+            show_alert=True,
+        )
+
+        return
+
+    oid = callback.data.split(":", 1)[1]
+
+    order = await get_order(oid)
+
+    if not order:
+
+        await callback.answer(
+            "❌ Buyurtma topilmadi",
+            show_alert=True,
+        )
+
+        return
+
+    _, user_id, amount, _, status, _, _ = order
+
+    if status == "paid":
+
+        await callback.answer(
+            "✅ Allaqachon tasdiqlangan",
+            show_alert=True,
+        )
+
+        return
+
+    await pay_order(oid, f"manual-{callback.from_user.id}")
+
+    await callback.answer("✅ Tasdiqlandi")
+
+    await callback.message.edit_caption(
+        caption=(callback.message.caption or "") + "\n\n✅ TASDIQLANDI",
+        reply_markup=None,
+    )
+
+    try:
+
+        await callback.bot.send_message(
+            user_id,
+            f"✅ To‘lovingiz tasdiqlandi!\n\n"
+            f"💰 Balansingizga {amount:,} so‘m qo‘shildi.",
+        )
+
+    except Exception as error:
+
+        print(
+            "NOTIFY USER ERROR:",
+            repr(error),
+        )
+
+
+# =========================================================
+# KARTA — ADMIN RAD ETISHI
+# =========================================================
+
+@router.callback_query(F.data.startswith("cheque_reject:"))
+async def cheque_reject(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+
+        await callback.answer(
+            "⛔️ Ruxsat yo‘q",
+            show_alert=True,
+        )
+
+        return
+
+    oid = callback.data.split(":", 1)[1]
+
+    order = await get_order(oid)
+
+    if not order:
+
+        await callback.answer(
+            "❌ Buyurtma topilmadi",
+            show_alert=True,
+        )
+
+        return
+
+    _, user_id, amount, _, status, _, _ = order
+
+    if status == "paid":
+
+        await callback.answer(
+            "✅ Allaqachon tasdiqlangan",
+            show_alert=True,
+        )
+
+        return
+
+    await reject_order(oid)
+
+    await callback.answer("❌ Rad etildi")
+
+    await callback.message.edit_caption(
+        caption=(callback.message.caption or "") + "\n\n❌ RAD ETILDI",
+        reply_markup=None,
+    )
+
+    try:
+
+        await callback.bot.send_message(
+            user_id,
+            "❌ To‘lov cheki rad etildi.\n\n"
+            "Iltimos, admin bilan bog‘laning yoki qaytadan urinib ko‘ring.",
+        )
+
+    except Exception as error:
+
+        print(
+            "NOTIFY USER ERROR:",
+            repr(error),
+        )
 
 
 # =========================================================
