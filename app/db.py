@@ -359,6 +359,26 @@ async def prepare_order(oid, tx):
 
 
 # =========================================================
+# REJECT ORDER
+# =========================================================
+
+async def reject_order(oid):
+
+    async with aiosqlite.connect(DB_PATH) as db:
+
+        await db.execute(
+            """
+            UPDATE orders
+            SET status = 'rejected'
+            WHERE order_id = ?
+            """,
+            (oid,),
+        )
+
+        await db.commit()
+
+
+# =========================================================
 # PAY ORDER
 # =========================================================
 
