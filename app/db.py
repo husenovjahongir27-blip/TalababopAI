@@ -1,11 +1,60 @@
-import aiosqlite
+import os
 from datetime import datetime
 
+import asyncpg
+
 from .config import (
-    DB_PATH,
     FREE_GENERATIONS,
     REFERRAL_BONUS_UZS,
 )
+
+# =========================================================
+# ULANISH (Neon / Supabase kabi bepul Postgres)
+# =========================================================
+# Render Environment Variables ichiga DATABASE_URL qo'shing.
+# Masalan:
+# postgresql://user:pass@ep-xxxx.neon.tech/dbname?sslmode=require
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+_pool = None
+
+
+def _parse_dsn():
+
+    dsn = DATABASE_URL
+    require_ssl = False
+
+    if dsn and "sslmode=require" in dsn:
+        require_ssl = True
+        dsn = dsn.split("?")[0]
+
+    return dsn, require_ssl
+
+
+async def get_pool():
+
+    global _pool
+
+    if _pool is None:
+
+        if not DATABASE_URL:
+            raise RuntimeError(
+                "DATABASE_URL topilmadi. Render'da "
+                "Environment Variables ichiga DATABASE_URL "
+                "qo'shing (Neon yoki Supabase Postgres manzili)."
+            )
+
+        dsn, require_ssl = _parse_dsn()
+
+        _pool = await asyncpg.create_pool(
+            dsn=dsn,
+            ssl="require" if require_ssl else None,
+            min_size=1,
+            max_size=5,
+        )
+
+    return _pool
 
 
 # =========================================================
@@ -14,24 +63,26 @@ from .config import (
 
 async def init_db():
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users(
-                user_id INTEGER PRIMARY KEY,
+                user_id BIGINT PRIMARY KEY,
                 username TEXT,
                 first_name TEXT,
                 balance INTEGER DEFAULT 0,
                 free_left INTEGER DEFAULT 3,
-                referral_id INTEGER,
+                referral_id BIGINT,
                 created_at TEXT
             )
         """)
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS jobs(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
                 kind TEXT,
                 topic TEXT,
                 status TEXT,
@@ -41,9 +92,9 @@ async def init_db():
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS orders(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 order_id TEXT UNIQUE,
-                user_id INTEGER,
+                user_id BIGINT,
                 amount INTEGER,
                 provider TEXT,
                 status TEXT DEFAULT 'pending',
@@ -54,8 +105,6 @@ async def init_db():
             )
         """)
 
-        await db.commit()
-
 
 # =========================================================
 # USER
@@ -63,11 +112,13 @@ async def init_db():
 
 async def ensure_user(user, ref=None):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        cursor = await db.execute(
+    async with pool.acquire() as db:
+
+        result = await db.execute(
             """
-            INSERT OR IGNORE INTO users(
+            INSERT INTO users(
                 user_id,
                 username,
                 first_name,
@@ -75,37 +126,35 @@ async def ensure_user(user, ref=None):
                 referral_id,
                 created_at
             )
-            VALUES(?,?,?,?,?,?)
+            VALUES($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (user_id) DO NOTHING
             """,
-            (
-                user.id,
-                user.username,
-                user.first_name,
-                FREE_GENERATIONS,
-                ref,
-                datetime.utcnow().isoformat(),
-            ),
+            user.id,
+            user.username,
+            user.first_name,
+            FREE_GENERATIONS,
+            ref,
+            datetime.utcnow().isoformat(),
         )
 
-        new_user = cursor.rowcount == 1
+        # asyncpg "INSERT 0 1" -> 1 qator qo'shildi (yangi user)
+        new_user = result.endswith(" 1")
 
         # Faqat yangi foydalanuvchiga referral bonus
         # beriladi.
         if new_user and ref and ref != user.id:
 
-            ref_cursor = await db.execute(
+            ref_result = await db.execute(
                 """
                 UPDATE users
-                SET balance = balance + ?
-                WHERE user_id = ?
+                SET balance = balance + $1
+                WHERE user_id = $2
                 """,
-                (
-                    REFERRAL_BONUS_UZS,
-                    ref,
-                ),
+                REFERRAL_BONUS_UZS,
+                ref,
             )
 
-            if ref_cursor.rowcount > 0:
+            if ref_result.endswith(" 1"):
 
                 print(
                     f"REFERRAL BONUS: "
@@ -118,18 +167,14 @@ async def ensure_user(user, ref=None):
             await db.execute(
                 """
                 UPDATE users
-                SET username = ?,
-                    first_name = ?
-                WHERE user_id = ?
+                SET username = $1,
+                    first_name = $2
+                WHERE user_id = $3
                 """,
-                (
-                    user.username,
-                    user.first_name,
-                    user.id,
-                ),
+                user.username,
+                user.first_name,
+                user.id,
             )
-
-        await db.commit()
 
 
 # =========================================================
@@ -138,18 +183,18 @@ async def ensure_user(user, ref=None):
 
 async def get_user(uid):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        return await (
-            await db.execute(
-                """
-                SELECT *
-                FROM users
-                WHERE user_id = ?
-                """,
-                (uid,),
-            )
-        ).fetchone()
+    async with pool.acquire() as db:
+
+        return await db.fetchrow(
+            """
+            SELECT *
+            FROM users
+            WHERE user_id = $1
+            """,
+            uid,
+        )
 
 
 # =========================================================
@@ -158,23 +203,23 @@ async def get_user(uid):
 
 async def consume(uid, price):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        r = await (
-            await db.execute(
-                """
-                SELECT free_left, balance
-                FROM users
-                WHERE user_id = ?
-                """,
-                (uid,),
-            )
-        ).fetchone()
+    async with pool.acquire() as db:
+
+        r = await db.fetchrow(
+            """
+            SELECT free_left, balance
+            FROM users
+            WHERE user_id = $1
+            """,
+            uid,
+        )
 
         if not r:
             return False
 
-        free_left, balance = r
+        free_left, balance = r["free_left"], r["balance"]
 
         # Avval bepul foydalanish
         if free_left > 0:
@@ -183,9 +228,9 @@ async def consume(uid, price):
                 """
                 UPDATE users
                 SET free_left = free_left - 1
-                WHERE user_id = ?
+                WHERE user_id = $1
                 """,
-                (uid,),
+                uid,
             )
 
         # Bepul tugagan bo'lsa balansdan yechish
@@ -194,19 +239,15 @@ async def consume(uid, price):
             await db.execute(
                 """
                 UPDATE users
-                SET balance = balance - ?
-                WHERE user_id = ?
+                SET balance = balance - $1
+                WHERE user_id = $2
                 """,
-                (
-                    price,
-                    uid,
-                ),
+                price,
+                uid,
             )
 
         else:
             return False
-
-        await db.commit()
 
         return True
 
@@ -217,21 +258,19 @@ async def consume(uid, price):
 
 async def add_balance(uid, amount):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute(
             """
             UPDATE users
-            SET balance = balance + ?
-            WHERE user_id = ?
+            SET balance = balance + $1
+            WHERE user_id = $2
             """,
-            (
-                amount,
-                uid,
-            ),
+            amount,
+            uid,
         )
-
-        await db.commit()
 
 
 # =========================================================
@@ -245,7 +284,9 @@ async def add_job(
     status="done",
 ):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute(
             """
@@ -256,18 +297,14 @@ async def add_job(
                 status,
                 created_at
             )
-            VALUES(?,?,?,?,?)
+            VALUES($1,$2,$3,$4,$5)
             """,
-            (
-                uid,
-                kind,
-                topic,
-                status,
-                datetime.utcnow().isoformat(),
-            ),
+            uid,
+            kind,
+            topic,
+            status,
+            datetime.utcnow().isoformat(),
         )
-
-        await db.commit()
 
 
 # =========================================================
@@ -281,7 +318,9 @@ async def create_order(
     provider,
 ):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute(
             """
@@ -292,18 +331,14 @@ async def create_order(
                 provider,
                 created_at
             )
-            VALUES(?,?,?,?,?)
+            VALUES($1,$2,$3,$4,$5)
             """,
-            (
-                oid,
-                uid,
-                amount,
-                provider,
-                datetime.utcnow().isoformat(),
-            ),
+            oid,
+            uid,
+            amount,
+            provider,
+            datetime.utcnow().isoformat(),
         )
-
-        await db.commit()
 
 
 # =========================================================
@@ -312,25 +347,25 @@ async def create_order(
 
 async def get_order(oid):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        return await (
-            await db.execute(
-                """
-                SELECT
-                    order_id,
-                    user_id,
-                    amount,
-                    provider,
-                    status,
-                    provider_tx_id,
-                    prepare_id
-                FROM orders
-                WHERE order_id = ?
-                """,
-                (oid,),
-            )
-        ).fetchone()
+    async with pool.acquire() as db:
+
+        return await db.fetchrow(
+            """
+            SELECT
+                order_id,
+                user_id,
+                amount,
+                provider,
+                status,
+                provider_tx_id,
+                prepare_id
+            FROM orders
+            WHERE order_id = $1
+            """,
+            oid,
+        )
 
 
 # =========================================================
@@ -339,23 +374,21 @@ async def get_order(oid):
 
 async def prepare_order(oid, tx):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute(
             """
             UPDATE orders
-            SET provider_tx_id = ?,
-                prepare_id = ?
-            WHERE order_id = ?
+            SET provider_tx_id = $1,
+                prepare_id = $2
+            WHERE order_id = $3
             """,
-            (
-                str(tx),
-                str(tx),
-                oid,
-            ),
+            str(tx),
+            str(tx),
+            oid,
         )
-
-        await db.commit()
 
 
 # =========================================================
@@ -364,18 +397,18 @@ async def prepare_order(oid, tx):
 
 async def reject_order(oid):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
+
+    async with pool.acquire() as db:
 
         await db.execute(
             """
             UPDATE orders
             SET status = 'rejected'
-            WHERE order_id = ?
+            WHERE order_id = $1
             """,
-            (oid,),
+            oid,
         )
-
-        await db.commit()
 
 
 # =========================================================
@@ -384,68 +417,61 @@ async def reject_order(oid):
 
 async def pay_order(oid, tx):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        await db.execute("BEGIN IMMEDIATE")
+    async with pool.acquire() as db:
 
-        r = await (
-            await db.execute(
+        async with db.transaction():
+
+            r = await db.fetchrow(
                 """
                 SELECT
                     user_id,
                     amount,
                     status
                 FROM orders
-                WHERE order_id = ?
+                WHERE order_id = $1
+                FOR UPDATE
                 """,
-                (oid,),
+                oid,
             )
-        ).fetchone()
 
-        if not r:
+            if not r:
+                return "missing"
 
-            await db.rollback()
+            user_id, amount, status = (
+                r["user_id"],
+                r["amount"],
+                r["status"],
+            )
 
-            return "missing"
+            # To'lov avval amalga oshgan bo'lsa,
+            # balansni ikkinchi marta oshirmaymiz.
+            if status == "paid":
+                return "already"
 
-        user_id, amount, status = r
-
-        # To'lov avval amalga oshgan bo'lsa,
-        # balansni ikkinchi marta oshirmaymiz.
-        if status == "paid":
-
-            await db.commit()
-
-            return "already"
-
-        await db.execute(
-            """
-            UPDATE orders
-            SET status = 'paid',
-                provider_tx_id = ?,
-                paid_at = ?
-            WHERE order_id = ?
-            """,
-            (
+            await db.execute(
+                """
+                UPDATE orders
+                SET status = 'paid',
+                    provider_tx_id = $1,
+                    paid_at = $2
+                WHERE order_id = $3
+                """,
                 str(tx),
                 datetime.utcnow().isoformat(),
                 oid,
-            ),
-        )
+            )
 
-        await db.execute(
-            """
-            UPDATE users
-            SET balance = balance + ?
-            WHERE user_id = ?
-            """,
-            (
+            await db.execute(
+                """
+                UPDATE users
+                SET balance = balance + $1
+                WHERE user_id = $2
+                """,
                 amount,
                 user_id,
-            ),
-        )
-
-        await db.commit()
+            )
 
         return "paid"
 
@@ -456,23 +482,23 @@ async def pay_order(oid, tx):
 
 async def history(uid):
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        return await (
-            await db.execute(
-                """
-                SELECT
-                    kind,
-                    topic,
-                    status
-                FROM jobs
-                WHERE user_id = ?
-                ORDER BY id DESC
-                LIMIT 10
-                """,
-                (uid,),
-            )
-        ).fetchall()
+    async with pool.acquire() as db:
+
+        return await db.fetch(
+            """
+            SELECT
+                kind,
+                topic,
+                status
+            FROM jobs
+            WHERE user_id = $1
+            ORDER BY id DESC
+            LIMIT 10
+            """,
+            uid,
+        )
 
 
 # =========================================================
@@ -481,38 +507,25 @@ async def history(uid):
 
 async def stats():
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        users = (
-            await (
-                await db.execute(
-                    "SELECT COUNT(*) FROM users"
-                )
-            ).fetchone()
-        )[0]
+    async with pool.acquire() as db:
 
-        jobs = (
-            await (
-                await db.execute(
-                    "SELECT COUNT(*) FROM jobs"
-                )
-            ).fetchone()
-        )[0]
+        users = await db.fetchval(
+            "SELECT COUNT(*) FROM users"
+        )
 
-        paid = (
-            await (
-                await db.execute(
-                    """
-                    SELECT COALESCE(
-                        SUM(amount),
-                        0
-                    )
-                    FROM orders
-                    WHERE status = 'paid'
-                    """
-                )
-            ).fetchone()
-        )[0]
+        jobs = await db.fetchval(
+            "SELECT COUNT(*) FROM jobs"
+        )
+
+        paid = await db.fetchval(
+            """
+            SELECT COALESCE(SUM(amount), 0)
+            FROM orders
+            WHERE status = 'paid'
+            """
+        )
 
         return users, jobs, paid
 
@@ -523,12 +536,12 @@ async def stats():
 
 async def get_all_user_ids():
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    pool = await get_pool()
 
-        rows = await (
-            await db.execute(
-                "SELECT user_id FROM users"
-            )
-        ).fetchall()
+    async with pool.acquire() as db:
 
-        return [row[0] for row in rows]
+        rows = await db.fetch(
+            "SELECT user_id FROM users"
+        )
+
+        return [row["user_id"] for row in rows]
