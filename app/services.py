@@ -38,13 +38,29 @@ async def generate(
     if not client:
         return "OPENAI_API_KEY sozlanmagan."
 
+    kind_lower = kind.lower()
+
+    is_slide = kind_lower in (
+        "slayd yaratish",
+        "slayd",
+        "taqdimot",
+    )
+
     extra = ""
 
-    if pages:
+    if pages and is_slide:
         extra += f"""
-Hujjat hajmi: {pages} bet.
+Jami slaydlar soni: {pages} ta.
+"""
+
+    elif pages:
+        target_words = int(pages) * 280
+
+        extra += f"""
+Hujjat hajmi: {pages} bet (taxminan {target_words} so'z).
 Hajmni mazmunni takrorlash yoki keraksiz cho'zish orqali emas,
 mazmunli va to'liq ilmiy material orqali ta'minla.
+Har bir bo'lim shu hajmga mutanosib ravishda batafsil yozilsin.
 """
 
     if template:
@@ -56,8 +72,6 @@ Tanlangan shablon: {template}.
         extra += f"""
 Tanlangan slayd dizayni: {design}.
 """
-
-    kind_lower = kind.lower()
 
     if kind_lower == "kurs ishi":
         instruction = """
@@ -181,6 +195,44 @@ Muhim ilmiy atamalarni tanla.
 Har bir atamaga aniq, qisqa va ilmiy ta'rif ber.
 """
 
+    elif is_slide:
+        slide_total = pages or 10
+
+        instruction = f"""
+TAQDIMOT (PREZENTATSIYA) UCHUN MATN TAYYORLA.
+
+Har bir slaydni ALOHIDA blok qilib, aynan quyidagi
+QATIY formatda yoz (boshqa hech qanday formatda emas):
+
+SLAYD 1: <Slaydning qisqa va aniq sarlavhasi (4-8 so'z)>
+- <Band: bitta tugallangan va aniq fikr, 6-16 so'z>
+- <Band>
+- <Band>
+- <Band>
+
+SLAYD 2: <Sarlavha>
+- <Band>
+- ...
+
+Talablar:
+- Jami aynan {slide_total} ta slayd yoz: SLAYD 1 dan
+  SLAYD {slide_total} gacha, birortasini ham tashlab
+  ketma.
+- 1-slayd — mavzuga kirish/umumiy tasavvur beruvchi
+  slayd bo'lsin.
+- Oxirgi slayd — xulosa/yakuniy fikrlar slaydi bo'lsin.
+- Har bir slaydda 3 tadan 5 tagacha band bo'lsin.
+- Har bir band mustaqil, tugallangan va mavzuga oid
+  aniq fakt, raqam yoki misol bilan boyitilgan bo'lsin
+  — umumiy va yuzaki gaplardan qoch.
+- Slaydlar sarlavhalari bir-birini takrorlamasin, har
+  biri o'ziga xos va mazmunga mos bo'lsin.
+- Bandlarni albatta "-" belgisi bilan boshla.
+- Faqat "SLAYD N:" va "-" bilan boshlanuvchi qatorlarni
+  yoz — hech qanday qo'shimcha izoh, kirish so'zi yoki
+  tushuntirish yozma.
+"""
+
     else:
         instruction = """
 Vazifani professional, tabiiy va ravon
@@ -205,12 +257,17 @@ Umumiy talablar:
 
 - O'zbek tilida yoz.
 - Grammatik jihatdan to'g'ri yoz.
-- Tabiiy inson yozganidek bo'lsin.
-- Bir xil fikrlarni takrorlama.
-- Keraksiz AI izohlarini yozma.
+- Tabiiy inson yozganidek bo'lsin, AI uslubiga o'xshamasin.
+- Umumiy va yuzaki gaplardan qoch — har bir fikrni aniq
+  fakt, misol, raqam yoki dalil bilan tasdiqla.
+- Bir xil fikr yoki jumlalarni boshqa so'zlar bilan
+  qayta aytib, hajmni sun'iy oshirma.
+- Keraksiz AI izohlarini ("albatta", "xulosa qilib
+  aytganda" kabi klişelarni ortiqcha ishlatmagan holda)
+  yozma.
 - Sarlavhalarni aniq ajrat.
 - Mavzudan chetga chiqma.
-- Imkon qadar mazmunli va batafsil yoz.
+- Imkon qadar mazmunli, chuqur va batafsil yoz.
 """
 
     response = await client.chat.completions.create(
@@ -229,6 +286,7 @@ Umumiy talablar:
             },
         ],
         temperature=0.6,
+        max_tokens=8000,
     )
 
     return response.choices[0].message.content or ""
@@ -1112,6 +1170,70 @@ def design_creative(
 
 
 # =========================================================
+# SLAYD MATNINI TAHLIL QILISH
+# =========================================================
+
+import re
+
+SLIDE_MARKER_RE = re.compile(
+    r"^SLAYD\s*\d+\s*[:\-]\s*(.+)$",
+    re.IGNORECASE,
+)
+
+
+def parse_slides(body, n):
+    """
+    AI qaytargan "SLAYD N: sarlavha" + "- band" formatidagi
+    matnni har bir slayd uchun (sarlavha, bandlar) ro'yxatiga
+    ajratadi. Agar AI formatga rioya qilmagan bo'lsa,
+    None qaytaradi — bu holda eski (qator bo'yicha bo'lish)
+    usuliga o'tiladi.
+    """
+
+    slides = []
+    current_title = None
+    current_bullets = []
+
+    for raw_line in body.splitlines():
+
+        line = raw_line.strip()
+
+        if not line:
+            continue
+
+        match = SLIDE_MARKER_RE.match(line)
+
+        if match:
+
+            if current_title is not None:
+                slides.append(
+                    (current_title, current_bullets)
+                )
+
+            current_title = match.group(1).strip(" *")
+            current_bullets = []
+
+            continue
+
+        if current_title is not None:
+
+            bullet = line.lstrip("-•*").strip()
+
+            if bullet:
+                current_bullets.append(bullet)
+
+    if current_title is not None:
+        slides.append((current_title, current_bullets))
+
+    # Kamida bitta slayd va bandlar topilmasa,
+    # format ishlatilmagan deb hisoblaymiz.
+    if not slides or not any(b for _, b in slides):
+        return None
+
+    return slides[:n]
+
+
+# =========================================================
 # SLAYD YARATISH
 # =========================================================
 
@@ -1142,38 +1264,63 @@ def make_pptx(
     presentation.slide_width = Inches(13.333)
     presentation.slide_height = Inches(7.5)
 
-    lines = [
-        x.strip()
-        for x in body.splitlines()
-        if x.strip()
-    ]
-
     # 1–30 oralig'ida
     n = max(
         1,
         min(int(n), 30),
     )
 
-    # Matnni slaydlarga taqsimlash
-    per_slide = max(
-        1,
-        (len(lines) + n - 1) // n,
-    )
+    parsed = parse_slides(body, n)
+
+    if parsed:
+
+        # AI to'g'ri formatda javob bergan —
+        # har bir slayd o'z sarlavhasi va bandlari bilan.
+        slide_data = [
+            (slide_title, bullets)
+            for slide_title, bullets in parsed
+            if bullets
+        ]
+
+    else:
+
+        # Zaxira usul: format topilmadi,
+        # matnni qatorlarga bo'lib taqsimlaymiz.
+        lines = [
+            x.strip()
+            for x in body.splitlines()
+            if x.strip()
+        ]
+
+        per_slide = max(
+            1,
+            (len(lines) + n - 1) // n,
+        )
+
+        slide_data = []
+
+        for i in range(n):
+
+            chunk = lines[
+                i * per_slide:
+                (i + 1) * per_slide
+            ]
+
+            if not chunk:
+                break
+
+            slide_title = (
+                title if i == 0 else f"{title} — {i + 1}"
+            )
+
+            slide_data.append((slide_title, chunk))
 
     selected = DESIGNS.get(
         design,
         DESIGNS["🎓 Akademik"],
     )
 
-    for i in range(n):
-
-        chunk = lines[
-            i * per_slide:
-            (i + 1) * per_slide
-        ]
-
-        if not chunk:
-            break
+    for i, (slide_title, chunk) in enumerate(slide_data):
 
         slide = presentation.slides.add_slide(
             presentation.slide_layouts[6]
@@ -1184,7 +1331,7 @@ def make_pptx(
 
             design_academic(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 selected,
@@ -1194,7 +1341,7 @@ def make_pptx(
 
             design_professional(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 selected,
@@ -1204,7 +1351,7 @@ def make_pptx(
 
             design_modern(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 selected,
@@ -1214,7 +1361,7 @@ def make_pptx(
 
             design_minimal(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 selected,
@@ -1224,7 +1371,7 @@ def make_pptx(
 
             design_creative(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 selected,
@@ -1234,7 +1381,7 @@ def make_pptx(
 
             design_academic(
                 slide,
-                title if i == 0 else f"{title} — {i + 1}",
+                slide_title,
                 chunk,
                 i + 1,
                 DESIGNS["🎓 Akademik"],
