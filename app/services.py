@@ -63,34 +63,34 @@ def _clean(text):
 
 
 async def generate(kind, topic, pages=None, template=None, design=None):
-    """
-    handlers.py bilan mos API.
-    Kurs ishi va mustaqil ishda katta hajm uchun matn bir necha
-    mantiqiy bloklarda generatsiya qilinadi.
-    """
-
     if not client:
         return "OPENAI_API_KEY sozlanmagan."
 
     kind_lower = (kind or "").lower().strip()
     pages = int(pages) if pages else None
 
-    # -----------------------------------------------------
-    # KURS ISHI
-    # -----------------------------------------------------
     if kind_lower == "kurs ishi":
-        # Avval reja. Reja keyingi bo'limlarning mantiqiy asosidir.
+        # Namuna asosida aynan 2 bob va 6 ta bo'lim.
         outline = await _ask(f"""
 MAVZU: {topic}
 
-Shu mavzu bo'yicha kurs ishi uchun aniq ilmiy REJA tuz.
+Shu mavzu bo'yicha kurs ishining MUNDARIJA rejasini tuz.
+Faqat quyidagi shaklda yoz:
+I BOB. [BOB NOMI KATTA HARFLARDA]
+1.1. [bo'lim nomi]
+1.2. [bo'lim nomi]
+1.3. [bo'lim nomi]
+II BOB. [BOB NOMI KATTA HARFLARDA]
+2.1. [bo'lim nomi]
+2.2. [bo'lim nomi]
+2.3. [bo'lim nomi]
 
-Faqat quyidagi tuzilmani saqla:
-I BOB. [katta harflarda bob nomi]
-1.1. [kichik harflarda bo'lim]
-1.2. [kichik harflarda bo'lim]
-1.3. [kichik harflarda bo'lim]
+Hech qanday izoh, kirish, xulosa yoki boshqa matn yozma.
+Bo'limlar mavzuga aniq mos bo'lsin, bir-birini takrorlamasin.
+""", max_tokens=1000)
+        outline = _clean(outline)
 
-II BOB. [katta harflarda bob nomi]
-2.1. [kichik harflarda bo'lim]
-2.2. [kichik harflarda bo'lim]
+        bob1 = next((x.split(".", 1)[1].strip() for x in outline.splitlines() if x.strip().upper().startswith("I BOB.")), "MAVZUNING NAZARIY ASOSLARI")
+        bob2 = next((x.split(".", 1)[1].strip() for x in outline.splitlines() if x.strip().upper().startswith("II BOB.")), "MAVZUNING AMALIY VA TAHLILIY JIHATLARI")
+
+        section_titles = {}
